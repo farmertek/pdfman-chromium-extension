@@ -4,7 +4,7 @@
   "version": "1.0.1",
   "description": "Quản lý PDF: xoay, sắp xếp, xóa, gộp trang và khóa/mở khóa PDF - Copyright © 2026 by Hailúa",
   "action": {
-    "default_title": "Mở PDF Manager",
+    "default_title": "Open PDF Manager",
     "default_icon": {
       "16": "icons/icon16.png",
       "48": "icons/icon48.png",

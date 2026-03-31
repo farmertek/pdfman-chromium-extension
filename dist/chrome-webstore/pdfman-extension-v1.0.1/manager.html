@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Manager - Copyright © 2026 by Hailúa</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/icon48.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png">
+  <link rel="stylesheet" href="manager.css">
+</head>
+<body>
+  <!-- ====== Tab Navigation ====== -->
+  <div class="tab-bar">
+    <button class="tab-btn active" data-tab="manager"><img src="icons/icon16.png" class="tab-icon"> PDF Manager</button>
+    <button class="tab-btn" data-tab="lock">🔒 PDF Lock/Unlock</button>
+  </div>
+
+  <!-- ====== TAB 1: PDF Manager ====== -->
+  <div id="tab-manager" class="tab-content active">
+    <!-- Top Bar -->
+    <div class="toolbar top-bar">
+      <div class="toolbar-left">
+        <button id="btn-open" class="btn btn-open" title="Tìm file PDF để mở và quản lý (hoặc kéo thả PDF vào khung nội dung)">📂 Open PDF</button>
+        <button id="btn-close" class="btn btn-close" disabled title="Đóng PDF hiện tại">✖ Close PDF</button>
+        <span id="file-info" class="file-info">Chưa chọn file nào</span>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-save" class="btn btn-save" disabled title="Lưu file PDF mới sau khi đã chỉnh sửa">💾 SaveAs PDF</button>
+      </div>
+    </div>
+
+    <!-- Action Bar -->
+    <div class="toolbar action-bar">
+      <div class="toolbar-left">
+        <button id="btn-add" class="btn btn-add" disabled title="Nối file PDF khác vào trước hoặc sau danh sách trang">➕ Add PDF</button>
+        <button id="btn-select-all" class="btn btn-select" disabled title="Chọn hoặc bỏ chọn tất cả các trang (Shift+Click: chọn khoảng)">☑ Select All</button>
+        <div class="btn-group">
+          <button id="btn-rotate-cw" class="btn btn-rotate" disabled title="Xoay các trang đã chọn 90° theo chiều kim đồng hồ">↻ +90°</button>
+          <button id="btn-rotate-ccw" class="btn btn-rotate" disabled title="Xoay các trang đã chọn 90° ngược chiều kim đồng hồ">↺ -90°</button>
+          <button id="btn-rotate-180" class="btn btn-rotate" disabled title="Xoay các trang đã chọn 180°">⇅ 180°</button>
+          <button id="btn-rotate-reset" class="btn btn-rotate-reset" disabled title="Reset lại các trang đã chọn về 0° (trạng thái ban đầu)">↺ Reset 0°</button>
+        </div>
+        <div class="btn-group">
+          <button id="btn-move-up" class="btn btn-move" disabled title="Di chuyển các trang đã chọn lên trên">⬆ Move Up</button>
+          <button id="btn-move-down" class="btn btn-move" disabled title="Di chuyển các trang đã chọn xuống dưới">⬇ Move Down</button>
+        </div>
+        <button id="btn-delete" class="btn btn-delete" disabled title="Xóa các trang đã chọn khỏi danh sách">🗑 Delete</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-reset-all" class="btn btn-reset-all" disabled title="Hoàn tác tất cả thay đổi và tải lại file PDF ban đầu">⎌ Reset All</button>
+      </div>
+    </div>
+
+    <!-- Pages Grid (main scrollable content area) -->
+    <div id="pages-wrapper" class="pages-wrapper">
+      <div id="pages-grid" class="pages-grid">
+        <div class="empty-placeholder" id="empty-placeholder">
+          <p class="empty-icon">📄</p>
+          <p>Chưa mở file PDF nào</p>
+          <p class="empty-hint">Nhấn <strong>"Open PDF"</strong> hoặc kéo thả file PDF vào đây</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="toolbar bottom-bar">
+      <div class="toolbar-left">
+        <span id="page-count" class="stat">Tổng số trang: 0</span>
+        <span id="selected-count" class="stat stat-selected">| Đã chọn: 0</span>
+      </div>
+      <div class="toolbar-right">
+        <label class="perf-toggle" title="Giảm RAM/CPU cho máy yếu (render chậm hơn)">
+          <input type="checkbox" id="low-mem-toggle">
+          Chế độ máy yếu
+        </label>
+        <div id="perf-widget" class="perf-widget" title="Ước lượng tài nguyên đang dùng của PDF Manager">
+          <span class="perf-chip"><strong>RAM:</strong> <span id="perf-ram">--</span></span>
+          <span class="perf-chip"><strong>CPU:</strong> <span id="perf-cpu">--</span></span>
+        </div>
+        <button id="btn-purge-memory" class="btn btn-purge-memory" disabled title="Dọn cache render tạm thời để giảm RAM/CPU khi cần">Purge Memory</button>
+        <span class="zoom-label">Zoom (%):</span>
+        <input type="number" id="zoom-input" class="zoom-input" value="80" min="10" max="500" disabled>
+        <button id="btn-zoom-apply" class="btn btn-zoom" disabled>Apply</button>
+      </div>
+    </div>
+
+    <!-- About Bar -->
+    <div class="about-bar">
+      <span class="about-text">Copyright © 2026 by Hailúa</span>
+      <a class="about-link" href="https://github.com/farmertek/pdfman-chromium-extension" target="_blank" rel="noopener">github.com/farmertek/pdfman-chromium-extension</a>
+    </div>
+  </div>
+
+  <!-- ====== TAB 2: PDF Lock/Unlock ====== -->
+  <div id="tab-lock" class="tab-content">
+    <div class="lock-container">
+      <h2 class="lock-title">Tool Lock/Unlock PDF with Restrictions (Encryption AES-256)</h2>
+
+      <!-- File selector -->
+      <div class="lock-section lock-file-section">
+        <button id="lock-btn-open" class="btn btn-open" title="Chọn file PDF để khóa/mở khóa">📂 Open PDF</button>
+        <span id="lock-file-info" class="file-info">Chưa chọn file</span>
+      </div>
+
+      <!-- Restrictions -->
+      <fieldset class="lock-section restrictions-fieldset" id="restrictions-fieldset">
+        <legend>Select Restrictions to Lock/Unlock</legend>
+        <div class="restrictions-controls">
+          <button id="lock-btn-reset" class="btn lock-ctrl-btn" disabled title="Reset về tùy chọn ban đầu của PDF">🔄 Reset</button>
+          <button id="lock-btn-toggle" class="btn lock-ctrl-btn" disabled title="Chọn/bỏ chọn tất cả">☑ Select All</button>
+          <span id="lock-encryption-info" class="encryption-info">File không được mã hóa</span>
+        </div>
+        <div class="restrictions-list" id="restrictions-list">
+          <label class="restriction-item"><input type="checkbox" data-key="print" checked disabled> 🚫 Khóa tính năng In (Print)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="copy" checked disabled> 🚫 Khóa tính năng Copy Text/Graphics</label>
+          <label class="restriction-item"><input type="checkbox" data-key="modify" checked disabled> 🚫 Khóa tính năng Sửa nội dung (Modify)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="annotate" checked disabled> 🚫 Khóa tính năng Thêm Comments (Annotate)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="fill" checked disabled> 🚫 Khóa tính năng Điền Form (Fill)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="extract" checked disabled> 🚫 Khóa tính năng Extract Text/Images</label>
+          <label class="restriction-item"><input type="checkbox" data-key="copy_accessibility" checked disabled> 🚫 Khóa Copy Text cho Accessibility</label>
+          <label class="restriction-item"><input type="checkbox" data-key="comment" checked disabled> 🚫 Khóa tính năng Commenting (Markup)</label>
+        </div>
+      </fieldset>
+
+      <!-- Password -->
+      <fieldset class="lock-section password-fieldset">
+        <legend>Password (tùy chọn)</legend>
+        <p class="hint">Nếu để trống, không cần password để mở PDF (chỉ khóa restrictions)</p>
+        <div class="password-row">
+          <label>Password:</label>
+          <input type="password" id="lock-password" class="lock-input" disabled>
+        </div>
+        <div class="password-row">
+          <label>Nhập lại Password:</label>
+          <input type="password" id="lock-password-confirm" class="lock-input" disabled>
+        </div>
+      </fieldset>
+
+      <!-- Actions -->
+      <div class="lock-section lock-actions">
+        <button id="lock-btn-lock" class="btn btn-lock" disabled title="Khóa PDF với restrictions và password đã chọn">🔒 Lock PDF</button>
+        <button id="lock-btn-unlock" class="btn btn-unlock" disabled title="Mở khóa PDF">🔓 Unlock PDF</button>
+        <span class="hint">PDF được lock mã hóa AES-256, nên đặt password khó để bảo vệ file tốt hơn</span>
+      </div>
+    </div>
+
+    <div class="about-bar">
+      <span class="about-text">Copyright © 2026 by Hailúa</span>
+      <a class="about-link" href="https://github.com/farmertek/pdfman-chromium-extension" target="_blank" rel="noopener">github.com/farmertek/pdfman-chromium-extension</a>
+    </div>
+  </div>
+
+  <!-- ====== Custom Modal Dialog ====== -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal-dialog">
+      <div class="modal-title" id="modal-title"></div>
+      <div class="modal-message" id="modal-message"></div>
+      <div class="modal-input-row hidden" id="modal-input-row">
+        <input type="password" id="modal-input" class="modal-input" placeholder="">
+      </div>
+      <div class="modal-buttons" id="modal-buttons"></div>
+    </div>
+  </div>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="file-input" accept=".pdf" multiple hidden>
+  <input type="file" id="file-input-add" accept=".pdf" multiple hidden>
+  <input type="file" id="lock-file-input" accept=".pdf" multiple hidden>
+
+  <!-- Libraries (populated by build.js) -->
+  <script src="lib/pdf.js"></script>
+  <script src="lib/pdf-lib.min.js"></script>
+  <script src="lib/qpdf/qpdf.js"></script>
+  <!-- Main application -->
+  <script src="manager.js"></script>
+</body>
+</html>
