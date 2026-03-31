@@ -7,6 +7,11 @@ PDFMan Browser Extension is a Chromium-based browser extension for PDF managemen
 This repository is for the browser extension code only.
 It is intentionally separate from any Python-based "PDF Manager" project.
 
+## Related repositories
+
+- Browser extension repo (this project): https://github.com/farmertek/pdfman-chromium-extension
+- Python repo: https://github.com/farmertek/pdf-manager
+
 ## Main files
 
 - `manifest.json`
