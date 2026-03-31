@@ -165,11 +165,16 @@ function createPdfIconPng(size) {
   ]);
 }
 
-console.log('Generating icons...');
+console.log('Ensuring icons...');
 [16, 48, 128].forEach(size => {
+  const iconPath = `icons/icon${size}.png`;
+  if (fs.existsSync(iconPath)) {
+    console.log(`  Kept existing: ${iconPath}`);
+    return;
+  }
   const png = createPdfIconPng(size);
-  fs.writeFileSync(`icons/icon${size}.png`, png);
-  console.log(`  Created: icons/icon${size}.png (${png.length} bytes)`);
+  fs.writeFileSync(iconPath, png);
+  console.log(`  Created: ${iconPath} (${png.length} bytes)`);
 });
 
 console.log('\nBuild complete! Extension is ready to load in Chrome.');
