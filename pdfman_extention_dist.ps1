@@ -58,7 +58,7 @@ function Get-PackageName {
     }
 }
 
-function Ensure-SourcesExist {
+function Test-SourcesExist {
     $missing = @()
 
     foreach ($rel in $FilesToCopy) {
@@ -80,7 +80,7 @@ function Ensure-SourcesExist {
     }
 }
 
-function Prepare-DistFolder {
+function Initialize-DistFolder {
     param(
         [string]$TargetDir
     )
@@ -114,7 +114,7 @@ function Copy-ExtensionFiles {
     }
 }
 
-function Build-Zip {
+function New-ZipArchive {
     param(
         [string]$TargetDir,
         [string]$ZipPath
@@ -143,7 +143,7 @@ try {
         }
     }
 
-    Ensure-SourcesExist
+    Test-SourcesExist
     $version = Get-PackageVersion
     $packageName = Get-PackageName
 
@@ -152,13 +152,13 @@ try {
     $zipPath = Join-Path $DistRoot ("$packageFolderName.zip")
 
     Write-Host "Preparing dist folder: $targetDir"
-    Prepare-DistFolder -TargetDir $targetDir
+    Initialize-DistFolder -TargetDir $targetDir
 
     Write-Host 'Copying extension files...'
     Copy-ExtensionFiles -TargetDir $targetDir
 
     Write-Host "Creating zip: $zipPath"
-    Build-Zip -TargetDir $targetDir -ZipPath $zipPath
+    New-ZipArchive -TargetDir $targetDir -ZipPath $zipPath
 
     $zipSize = (Get-Item -Path $zipPath).Length
     Write-Host 'Package created successfully.'

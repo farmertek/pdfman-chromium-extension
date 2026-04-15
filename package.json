@@ -1,10 +1,12 @@
 {
   "name": "pdfman-extension",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "PDF Manager - Chrome Extension for managing, rotating, reordering, merging, and locking/unlocking PDF files",
   "private": true,
   "scripts": {
-    "build": "node build.js"
+    "build": "node build.js",
+    "build:wasm": "wasm-pack build ../../wasm --release --target web --out-dir ../web_ext/pdfman/lib/pdfman_wasm",
+    "build:all": "npm run build:wasm && npm run build"
   },
   "dependencies": {
     "pdf-lib": "^1.17.1",

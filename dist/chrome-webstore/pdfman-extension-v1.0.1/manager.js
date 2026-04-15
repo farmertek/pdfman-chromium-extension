@@ -23,18 +23,37 @@
 
   const DOWNLOAD_REVOKE_DELAY_MS = 1500;
   const AUTOLOAD_URL_PARAM = 'autoloadPdfUrl';
+  const AUTOLOAD_TAB_URL_PARAM = 'autoloadSourceTabUrl';
+  const AUTOLOAD_TAB_ID_PARAM = 'autoloadSourceTabId';
+  const RESOLVE_TAB_PDF_URL_MESSAGE = 'pdfman.resolvePdfUrlFromTab';
   const OPFS_TEMP_DIR = 'pdfman-temp';
   const PERF_MODE_STORAGE_KEY = 'pdfman.performanceMode';
   const RASTER_WORKER_SCRIPT = 'pdf-raster-worker.js';
   const RASTER_WORKER_TIMEOUT_MS = 180000;
   const RUNTIME_MEMORY_SAMPLE_INTERVAL_MS = 2000;
+  const AUTO_PURGE_DEBOUNCE_MS = 180;
+  const AUTO_PURGE_COOLDOWN_MS = 900;
+  const SCROLL_IDLE_REFRESH_DELAY_MS = 90;
+  const SCROLL_RELEASE_REFRESH_WINDOW_MS = 450;
+  const WASM_HELPER_MODULE = 'lib/pdfman_wasm/pdfman_wasm.js';
+  const WASM_HELPER_BINARY = 'lib/pdfman_wasm/pdfman_wasm_bg.wasm';
+  const MIN_ZOOM_PERCENT = 40;
+  const MAX_ZOOM_PERCENT = 500;
+  const ZOOM_STEP_PERCENT = 5;
+  const WHEEL_ZOOM_IDLE_RESET_MS = 140;
+  const WHEEL_ZOOM_PIXELS_PER_STEP = 85;
+  const WHEEL_ZOOM_MAX_STEPS_PER_EVENT = 2;
+  const WHEEL_ZOOM_APPLY_DELAY_MS = 180;
+  const CARD_WIDTH_PADDING_PX = 28;
+  const MIN_THUMB_PREVIEW_WIDTH = 64;
+  const MIN_THUMB_PREVIEW_HEIGHT = 40;
   const PERF_PROFILES = Object.freeze({
     normal: {
       viewCanvasPixels: 2000000,
       exportCanvasPixels: 5000000,
       renderConcurrency: 2,
       rootMargin: '250px 0px',
-      previewBaseWidth: 220,
+      previewBaseWidth: 180,
       maxRenderedPages: 8,
       renderWindowPaddingPages: 3,
       renderWindowHardCapPages: 14,
@@ -45,11 +64,11 @@
       exportCanvasPixels: 2800000,
       renderConcurrency: 1,
       rootMargin: '80px 0px',
-      previewBaseWidth: 180,
+      previewBaseWidth: 160,
       maxRenderedPages: 4,
       renderWindowPaddingPages: 1,
       renderWindowHardCapPages: 6,
-      exportJpegQuality: 0.82,
+      exportJpegQuality: 0.65,
     },
   });
 
@@ -58,6 +77,22 @@
   let opfsTempSeq = 0;
   let rasterTaskSeq = 0;
   let activePerfMode = 'normal';
+  const wasmHelperState = {
+    module: null,
+    initPromise: null,
+    disabled: false,
+    warnedRenderWindow: false,
+    warnedPreviewDims: false,
+    lazyRenderEngine: 'js',
+  };
+
+  function setLazyRenderEngine(mode) {
+    wasmHelperState.lazyRenderEngine = (mode === 'wasm') ? 'wasm' : 'js';
+  }
+
+  function getLazyRenderEngine() {
+    return wasmHelperState.lazyRenderEngine;
+  }
 
   function getSafePerfMode(mode) {
     return Object.prototype.hasOwnProperty.call(PERF_PROFILES, mode) ? mode : 'normal';
@@ -148,6 +183,40 @@
     return fileName;
   }
 
+  async function writeFileToOpfs(file, prefix) {
+    if (!file || typeof file.arrayBuffer !== 'function') return null;
+
+    const dir = await getOpfsTempDirHandle();
+    if (!dir) return null;
+
+    const fileName = createOpfsTempName(prefix || 'pdf');
+    const fileHandle = await dir.getFileHandle(fileName, { create: true });
+    const writable = await fileHandle.createWritable();
+    let usedPipeTo = false;
+
+    try {
+      if (typeof file.stream === 'function') {
+        const stream = file.stream();
+        if (stream && typeof stream.pipeTo === 'function') {
+          await stream.pipeTo(writable);
+          usedPipeTo = true;
+          return fileName;
+        }
+      }
+
+      await writable.write(await file.arrayBuffer());
+      return fileName;
+    } catch {
+      try { await writable.abort(); } catch { /* ignore */ }
+      try { await deleteOpfsFile(fileName); } catch { /* ignore */ }
+      return null;
+    } finally {
+      if (!usedPipeTo) {
+        try { await writable.close(); } catch { /* ignore */ }
+      }
+    }
+  }
+
   async function readBytesFromOpfs(fileName) {
     if (!fileName) return null;
     const dir = await getOpfsTempDirHandle();
@@ -195,7 +264,11 @@
   }
 
   async function runRasterWorkerTask(opts) {
-    if (!opts || !(opts.bytes instanceof Uint8Array) || !opts.bytes.byteLength) return null;
+    if (!opts) return null;
+
+    const hasBytes = (opts.bytes instanceof Uint8Array) && opts.bytes.byteLength > 0;
+    const hasSourceUrl = typeof opts.sourceUrl === 'string' && opts.sourceUrl.length > 0;
+    if (!hasBytes && !hasSourceUrl) return null;
     if (!canUseRasterWorker()) return null;
 
     const workerUrl = (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL)
@@ -203,8 +276,8 @@
       : RASTER_WORKER_SCRIPT;
 
     const taskId = ++rasterTaskSeq;
-    const transferBuffer = toTransferableBuffer(opts.bytes);
-    if (!transferBuffer) return null;
+    const transferBuffer = hasBytes ? toTransferableBuffer(opts.bytes) : null;
+    if (hasBytes && !transferBuffer) return null;
 
     return new Promise((resolve) => {
       let settled = false;
@@ -247,10 +320,11 @@
 
       timeoutId = setTimeout(() => finish(null), RASTER_WORKER_TIMEOUT_MS);
 
-      worker.postMessage({
+      const payload = {
         id: taskId,
         type: opts.type || 'rasterize',
         bytes: transferBuffer,
+        sourceUrl: hasSourceUrl ? opts.sourceUrl : null,
         password: opts.password || '',
         pageOrder: Array.isArray(opts.pageOrder) ? opts.pageOrder : null,
         rotations: opts.rotations || null,
@@ -258,7 +332,13 @@
         maxPixels: typeof opts.maxPixels === 'number' ? opts.maxPixels : perf.exportCanvasPixels,
         scaleHint: typeof opts.scaleHint === 'number' ? opts.scaleHint : null,
         lowMemory: isLowMemoryMode(),
-      }, [transferBuffer]);
+      };
+
+      if (transferBuffer) {
+        worker.postMessage(payload, [transferBuffer]);
+      } else {
+        worker.postMessage(payload);
+      }
     });
   }
 
@@ -286,6 +366,111 @@
     if (pageCount <= 160) return 1.3;
     if (pageCount <= 300) return 1.1;
     return 1.0;
+  }
+
+  function resolveRuntimeAssetUrl(relativePath) {
+    try {
+      if (typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.getURL === 'function') {
+        return chrome.runtime.getURL(relativePath);
+      }
+    } catch {
+      // Ignore runtime URL errors and use relative path fallback.
+    }
+    return relativePath;
+  }
+
+  async function ensureWasmHelpers() {
+    if (wasmHelperState.module || wasmHelperState.disabled) {
+      return wasmHelperState.module;
+    }
+
+    if (!wasmHelperState.initPromise) {
+      wasmHelperState.initPromise = (async () => {
+        try {
+          const moduleUrl = resolveRuntimeAssetUrl(WASM_HELPER_MODULE);
+          const binaryUrl = resolveRuntimeAssetUrl(WASM_HELPER_BINARY);
+          const wasmModule = await import(moduleUrl);
+
+          if (typeof wasmModule.default === 'function') {
+            await wasmModule.default({ module_or_path: binaryUrl });
+          }
+
+          wasmHelperState.module = wasmModule;
+          if (typeof wasmModule.compute_render_window_indices === 'function') {
+            setLazyRenderEngine('wasm');
+          }
+          return wasmModule;
+        } catch (err) {
+          wasmHelperState.disabled = true;
+          setLazyRenderEngine('js');
+          console.warn('WASM helper unavailable. Falling back to JavaScript logic.', err);
+          return null;
+        }
+      })();
+    }
+
+    return wasmHelperState.initPromise;
+  }
+
+  function getWasmHelpersSync() {
+    return wasmHelperState.module;
+  }
+
+  function computePreviewDimensionsWithFallback(previewBaseWidth, zoomLevel, defaultAspect, rotation) {
+    const safeZoom = (Number.isFinite(zoomLevel) && zoomLevel > 0) ? zoomLevel : 1.0;
+    const safeAspect = defaultAspect > 0 ? defaultAspect : Math.sqrt(2);
+    const rotated = ((rotation % 180) + 180) % 180 !== 0;
+    const aspect = rotated ? (1 / safeAspect) : safeAspect;
+    const width = Math.max(MIN_THUMB_PREVIEW_WIDTH, Math.round(previewBaseWidth * safeZoom));
+    const height = Math.max(MIN_THUMB_PREVIEW_HEIGHT, Math.round(width * aspect));
+
+    return { width, height };
+  }
+
+  function computeRenderWindowWithFallback(totalPages, visibleSet, hardCap, padding) {
+    const wasm = getWasmHelpersSync();
+    if (!(wasm && typeof wasm.compute_render_window_indices === 'function')) {
+      setLazyRenderEngine('js');
+      return null;
+    }
+
+    try {
+      const visible = Array.from(visibleSet)
+        .filter((idx) => Number.isInteger(idx) && idx >= 0 && idx < totalPages)
+        .sort((a, b) => a - b);
+
+      const result = wasm.compute_render_window_indices(
+        totalPages,
+        Uint32Array.from(visible),
+        hardCap,
+        padding
+      );
+      const indices = Array.from(result || []);
+      const allowed = new Set();
+
+      indices.forEach((idx) => {
+        const value = Number(idx);
+        if (Number.isInteger(value) && value >= 0 && value < totalPages) {
+          allowed.add(value);
+        }
+      });
+
+      if (!allowed.size) {
+        setLazyRenderEngine('js');
+        return null;
+      }
+
+      visible.forEach((idx) => allowed.add(idx));
+      setLazyRenderEngine('wasm');
+      return allowed;
+    } catch (err) {
+      setLazyRenderEngine('js');
+      if (!wasmHelperState.warnedRenderWindow) {
+        wasmHelperState.warnedRenderWindow = true;
+        console.warn('WASM render window failed. Falling back to JavaScript logic.', err);
+      }
+      return null;
+    }
   }
 
   async function renderPageToJpegBytes(page, opts) {
@@ -398,7 +583,7 @@
     try {
       const task = pdfjsLib.getDocument({ data: bytes.slice() });
       const doc = await task.promise;
-      doc.destroy();
+      await doc.destroy();
     } catch (e) {
       if (e && e.name === 'PasswordException') {
         const result = await showPasswordPrompt(
@@ -410,7 +595,7 @@
         try {
           const task2 = pdfjsLib.getDocument({ data: bytes.slice(), password });
           const doc2 = await task2.promise;
-          doc2.destroy();
+          await doc2.destroy();
         } catch {
           await showAlert('Lỗi', 'Password không đúng hoặc file không thể mở.');
           return null;
@@ -444,7 +629,7 @@
         p.cleanup();
         valid = ops.fnArray.length > 2;
       }
-      vDoc.destroy();
+      await vDoc.destroy();
       if (valid) return cleaned;
     } catch { /* fall through */ }
 
@@ -481,7 +666,7 @@
       await showAlert('Lỗi', 'Không thể mở khóa file PDF:\n' + err.message);
       return bytes;
     } finally {
-      if (pdfDoc) pdfDoc.destroy();
+      if (pdfDoc) await pdfDoc.destroy();
     }
   }
 
@@ -685,7 +870,7 @@
     try {
       return await readOutlineTree(pdfDoc);
     } finally {
-      pdfDoc.destroy();
+      await pdfDoc.destroy();
     }
   }
 
@@ -724,8 +909,12 @@
 
       this.zoomLevel = 0.80;
       this.zoomTimer = null;
+      this._wheelZoomAccumulatorPx = 0;
+      this._lastWheelZoomAt = 0;
       this.hasUnsavedAppend = false;
       this.defaultPageAspect = Math.sqrt(2);
+      this.currentColumnCount = 0;
+      this.sourceStorageMode = 'none';
 
       this._pdfPassword = '';       // Password for encrypted PDF (for pdf.js rendering)
       this._isEncrypted = false;    // Whether working PDF is still encrypted
@@ -759,9 +948,21 @@
         taskMgrEstimateBytes: 0,
       };
       this._purgeInProgress = false;
+      this._resizeTimer = null;
+      this._scrollIdleTimer = null;
+      this._lastScrollAt = 0;
+      this._onWrapperScroll = null;
+      this._onScrollEnd = null;
+      this._onScrollRelease = null;
+      this._autoPurgeTimer = null;
+      this._lastAutoPurgeAt = 0;
 
-      this._onPageHide = () => this.dispose();
+      this._onPageHide = () => {
+        this.dispose().catch(() => { /* ignore */ });
+      };
+      this._onResize = () => this.handleViewportResize();
       window.addEventListener('pagehide', this._onPageHide, true);
+      window.addEventListener('resize', this._onResize, true);
 
       // --- DOM refs ---
       this.dom = {};
@@ -795,6 +996,8 @@
         fileInfo: $('file-info'),
         pageCount: $('page-count'),
         selectedCount: $('selected-count'),
+        lazyRenderStatus: $('lazy-render-status'),
+        tempPathStatus: $('temp-path-status'),
         pagesWrapper: $('pages-wrapper'),
         pagesGrid: $('pages-grid'),
         emptyPlaceholder: $('empty-placeholder'),
@@ -836,6 +1039,9 @@
 
       // Zoom input enter key
       this.dom.zoomInput.onkeydown = (e) => { if (e.key === 'Enter') this.applyZoom(); };
+      this.dom.zoomInput.min = String(MIN_ZOOM_PERCENT);
+      this.dom.zoomInput.max = String(MAX_ZOOM_PERCENT);
+      this.dom.zoomInput.step = String(ZOOM_STEP_PERCENT);
 
       // Keyboard shortcuts
       document.addEventListener('keydown', (e) => {
@@ -850,6 +1056,8 @@
         }
       }, { passive: false });
 
+      this.setupScrollReleaseRefresh();
+
       // Drag and drop
       this.setupDragDrop();
 
@@ -859,7 +1067,261 @@
       }
       this.applyPerformanceMode(activePerfMode, true);
       this.startRuntimeStatsMonitor();
+      this.updateLazyRenderStatus();
+      ensureWasmHelpers().then(() => {
+        this.refreshRenderWindow();
+        this.updateLazyRenderStatus();
+      }).catch(() => {
+        this.updateLazyRenderStatus();
+      });
       this.tryAutoOpenFromLaunchContext().catch(() => { /* ignore */ });
+    }
+
+    setupScrollReleaseRefresh() {
+      const wrapper = this.dom.pagesWrapper;
+      if (!wrapper) return;
+
+      this.teardownScrollReleaseRefresh();
+
+      this._onWrapperScroll = () => {
+        this._lastScrollAt = Date.now();
+        this.scheduleScrollRefresh();
+      };
+
+      this._onScrollEnd = () => {
+        this.flushScrollRefresh();
+      };
+
+      this._onScrollRelease = () => {
+        if (!this.pageElements.length) return;
+        const sinceScroll = Date.now() - this._lastScrollAt;
+        if (this._scrollIdleTimer || sinceScroll <= SCROLL_RELEASE_REFRESH_WINDOW_MS) {
+          this.flushScrollRefresh();
+          this.scheduleAutoPurgeMemory('scroll-release', { preserveViewport: true });
+        }
+      };
+
+      wrapper.addEventListener('scroll', this._onWrapperScroll, { passive: true });
+      wrapper.addEventListener('scrollend', this._onScrollEnd, { passive: true });
+      document.addEventListener('pointerup', this._onScrollRelease, true);
+      document.addEventListener('touchend', this._onScrollRelease, true);
+    }
+
+    teardownScrollReleaseRefresh() {
+      const wrapper = this.dom.pagesWrapper;
+
+      if (this._scrollIdleTimer) {
+        clearTimeout(this._scrollIdleTimer);
+        this._scrollIdleTimer = null;
+      }
+
+      if (this._autoPurgeTimer) {
+        clearTimeout(this._autoPurgeTimer);
+        this._autoPurgeTimer = null;
+      }
+
+      if (wrapper && this._onWrapperScroll) {
+        wrapper.removeEventListener('scroll', this._onWrapperScroll);
+      }
+      if (wrapper && this._onScrollEnd) {
+        wrapper.removeEventListener('scrollend', this._onScrollEnd);
+      }
+      if (this._onScrollRelease) {
+        document.removeEventListener('pointerup', this._onScrollRelease, true);
+        document.removeEventListener('touchend', this._onScrollRelease, true);
+      }
+
+      this._onWrapperScroll = null;
+      this._onScrollEnd = null;
+      this._onScrollRelease = null;
+      this._lastScrollAt = 0;
+    }
+
+    scheduleScrollRefresh() {
+      if (!this.pageElements.length || !this.hasPdfSource()) return;
+
+      if (this._scrollIdleTimer) {
+        clearTimeout(this._scrollIdleTimer);
+      }
+
+      this._scrollIdleTimer = setTimeout(() => {
+        this._scrollIdleTimer = null;
+        this.flushScrollRefresh();
+      }, SCROLL_IDLE_REFRESH_DELAY_MS);
+    }
+
+    flushScrollRefresh() {
+      if (!this.pageElements.length || !this.hasPdfSource()) return;
+
+      if (this._scrollIdleTimer) {
+        clearTimeout(this._scrollIdleTimer);
+        this._scrollIdleTimer = null;
+      }
+
+      this.syncVisibleIndicesWithViewport();
+      this.refreshRenderWindow();
+    }
+
+    scheduleAutoPurgeMemory(source, opts) {
+      if (!this.hasPdfSource() || !this.pageElements.length) return;
+      if (this._purgeInProgress) return;
+
+      const preserveViewport = !(opts && opts.preserveViewport === false);
+      const now = Date.now();
+      const sinceLast = now - this._lastAutoPurgeAt;
+      const cooldownWait = (sinceLast >= AUTO_PURGE_COOLDOWN_MS)
+        ? 0
+        : (AUTO_PURGE_COOLDOWN_MS - sinceLast);
+      const waitMs = Math.max(AUTO_PURGE_DEBOUNCE_MS, cooldownWait);
+
+      if (this._autoPurgeTimer) {
+        clearTimeout(this._autoPurgeTimer);
+      }
+
+      this._autoPurgeTimer = setTimeout(() => {
+        this._autoPurgeTimer = null;
+        this.purgeMemory({
+          auto: true,
+          source,
+          preserveViewport,
+          showErrorAlert: false,
+        }).catch(() => { /* ignore */ });
+      }, waitMs);
+    }
+
+    captureViewportState() {
+      const wrapper = this.dom.pagesWrapper;
+      if (!wrapper) return null;
+
+      const maxScroll = Math.max(1, wrapper.scrollHeight - wrapper.clientHeight);
+      const ratio = Math.max(0, Math.min(1, wrapper.scrollTop / maxScroll));
+      const rootRect = wrapper.getBoundingClientRect();
+
+      let anchorEntry = null;
+      for (let i = 0; i < this.pageElements.length; i++) {
+        const entry = this.pageElements[i];
+        if (!entry || !entry.container) continue;
+        const rect = entry.container.getBoundingClientRect();
+        if (rect.bottom >= rootRect.top) {
+          anchorEntry = entry;
+          break;
+        }
+      }
+
+      let anchorOrigIdx = null;
+      let anchorOffsetRatio = 0;
+      if (anchorEntry && anchorEntry.container) {
+        const height = Math.max(1, anchorEntry.container.offsetHeight || 1);
+        anchorOrigIdx = anchorEntry.origIdx;
+        anchorOffsetRatio = Math.max(
+          0,
+          Math.min(1, (wrapper.scrollTop - anchorEntry.container.offsetTop) / height)
+        );
+      }
+
+      return {
+        ratio,
+        anchorOrigIdx,
+        anchorOffsetRatio,
+      };
+    }
+
+    restoreViewportState(state) {
+      const wrapper = this.dom.pagesWrapper;
+      if (!wrapper || !state) return;
+
+      let restoredByAnchor = false;
+      if (Number.isInteger(state.anchorOrigIdx)) {
+        const anchorEntry = this.pageElements.find((entry) => (
+          entry
+          && entry.container
+          && entry.origIdx === state.anchorOrigIdx
+        ));
+
+        if (anchorEntry && anchorEntry.container) {
+          const height = Math.max(1, anchorEntry.container.offsetHeight || 1);
+          const offsetRatio = Number.isFinite(state.anchorOffsetRatio)
+            ? Math.max(0, Math.min(1, state.anchorOffsetRatio))
+            : 0;
+          const targetTop = anchorEntry.container.offsetTop + (height * offsetRatio);
+          wrapper.scrollTop = Math.max(0, targetTop);
+          restoredByAnchor = true;
+        }
+      }
+
+      if (!restoredByAnchor) {
+        const maxScroll = Math.max(0, wrapper.scrollHeight - wrapper.clientHeight);
+        const ratio = Number.isFinite(state.ratio)
+          ? Math.max(0, Math.min(1, state.ratio))
+          : 0;
+        wrapper.scrollTop = maxScroll > 0 ? Math.round(maxScroll * ratio) : 0;
+      }
+
+      this.syncVisibleIndicesWithViewport();
+      this.refreshRenderWindow();
+    }
+
+    syncVisibleIndicesWithViewport() {
+      const wrapper = this.dom.pagesWrapper;
+      if (!wrapper || !this.pageElements.length) return false;
+
+      const rootRect = wrapper.getBoundingClientRect();
+      if (!rootRect || rootRect.width <= 0 || rootRect.height <= 0) {
+        return false;
+      }
+
+      const nextVisible = new Set();
+      for (let i = 0; i < this.pageElements.length; i++) {
+        const entry = this.pageElements[i];
+        if (!entry || !entry.container) continue;
+
+        const rect = entry.container.getBoundingClientRect();
+        const intersects = rect.bottom >= rootRect.top
+          && rect.top <= rootRect.bottom
+          && rect.right >= rootRect.left
+          && rect.left <= rootRect.right;
+
+        if (intersects) {
+          nextVisible.add(i);
+        }
+      }
+
+      if (!nextVisible.size && this.pageElements.length) {
+        const maxScroll = Math.max(1, wrapper.scrollHeight - wrapper.clientHeight);
+        const ratio = Math.max(0, Math.min(1, wrapper.scrollTop / maxScroll));
+        const fallbackIdx = Math.max(
+          0,
+          Math.min(this.pageElements.length - 1, Math.round(ratio * (this.pageElements.length - 1)))
+        );
+        nextVisible.add(fallbackIdx);
+      }
+
+      if (nextVisible.size === this.visibleVisualIndices.size) {
+        let unchanged = true;
+        for (const idx of nextVisible) {
+          if (!this.visibleVisualIndices.has(idx)) {
+            unchanged = false;
+            break;
+          }
+        }
+        if (unchanged) return false;
+      }
+
+      this.visibleVisualIndices = nextVisible;
+      return true;
+    }
+
+    handleViewportResize() {
+      if (!this.hasPdfSource() || !this.pageOrder.length) {
+        this.updateLazyRenderStatus();
+        return;
+      }
+
+      if (this._resizeTimer) clearTimeout(this._resizeTimer);
+      this._resizeTimer = setTimeout(() => {
+        this._resizeTimer = null;
+        this.scheduleAutoPurgeMemory('viewport-resize', { preserveViewport: true });
+      }, 140);
     }
 
     onPerformanceModeToggle() {
@@ -885,22 +1347,93 @@
         });
         this.rebuildWithPreservation(preserveOrig).catch(() => { /* ignore */ });
       }
+
+      this.updateLazyRenderStatus();
     }
 
-    getAutoOpenPdfUrlFromQuery() {
+    getStorageModeLabel() {
+      if (this.sourceStorageMode === 'opfs') return 'OPFS temp';
+      if (this.sourceStorageMode === 'memory') return 'RAM fallback';
+      return '--';
+    }
+
+    getTempPathLabel() {
+      if (this._workingPdfOpfsFile) {
+        return `opfs://${OPFS_TEMP_DIR}/${this._workingPdfOpfsFile}`;
+      }
+      if (this.pdfBytes instanceof Uint8Array) {
+        return 'memory://working-pdf-bytes';
+      }
+      return '--';
+    }
+
+    updateTempPathStatus() {
+      if (!this.dom.tempPathStatus) return;
+      const tempPath = this.getTempPathLabel();
+      this.dom.tempPathStatus.textContent = `| Temp path: ${tempPath}`;
+      this.dom.tempPathStatus.title = tempPath === '--'
+        ? 'Chưa có dữ liệu temp đang hoạt động.'
+        : tempPath;
+    }
+
+    getLazyRenderEngineLabel() {
+      return getLazyRenderEngine() === 'wasm' ? 'WASM' : 'JS';
+    }
+
+    updateLazyRenderStatus() {
+      if (!this.dom.lazyRenderStatus) return;
+
+      const zoomPercent = Math.round(this.zoomLevel * 100);
+      const columns = this.currentColumnCount > 0
+        ? this.currentColumnCount
+        : (this.hasPdfSource() ? this.getColumnCount() : 0);
+      const engine = this.getLazyRenderEngineLabel();
+      const storage = this.getStorageModeLabel();
+
+      this.dom.lazyRenderStatus.textContent =
+        `| Thumbnail mode: lazy-rendered | ${engine} | ${columns} columns | Zoom ${zoomPercent}% | Storage: ${storage}`;
+      this.updateTempPathStatus();
+    }
+
+    getAutoOpenParamFromQuery(paramName) {
+      if (!paramName) return null;
       try {
         const params = new URLSearchParams(window.location.search || '');
-        return params.get(AUTOLOAD_URL_PARAM);
+        return params.get(paramName);
       } catch {
         return null;
       }
     }
 
+    getAutoOpenPdfUrlFromQuery() {
+      return this.getAutoOpenParamFromQuery(AUTOLOAD_URL_PARAM);
+    }
+
+    getAutoOpenSourceTabUrlFromQuery() {
+      return this.getAutoOpenParamFromQuery(AUTOLOAD_TAB_URL_PARAM);
+    }
+
+    getAutoOpenSourceTabIdFromQuery() {
+      const rawTabId = this.getAutoOpenParamFromQuery(AUTOLOAD_TAB_ID_PARAM);
+      if (rawTabId == null) return null;
+
+      const tabId = Number(rawTabId);
+      if (!Number.isInteger(tabId) || tabId < 0) return null;
+      return tabId;
+    }
+
     clearAutoOpenPdfUrlFromQuery() {
       try {
         const url = new URL(window.location.href);
-        if (!url.searchParams.has(AUTOLOAD_URL_PARAM)) return;
-        url.searchParams.delete(AUTOLOAD_URL_PARAM);
+        let changed = false;
+
+        [AUTOLOAD_URL_PARAM, AUTOLOAD_TAB_URL_PARAM, AUTOLOAD_TAB_ID_PARAM].forEach((key) => {
+          if (!url.searchParams.has(key)) return;
+          url.searchParams.delete(key);
+          changed = true;
+        });
+
+        if (!changed) return;
         const clean = `${url.pathname}${url.search}${url.hash}`;
         window.history.replaceState({}, document.title, clean);
       } catch {
@@ -921,30 +1454,314 @@
       }
     }
 
-    async tryAutoOpenFromLaunchContext() {
-      const pdfUrl = this.getAutoOpenPdfUrlFromQuery();
-      if (!pdfUrl) return;
-      this.clearAutoOpenPdfUrlFromQuery();
+    decodeUrlForLocalFile(value) {
+      let current = String(value || '');
+      for (let i = 0; i < 2; i++) {
+        try {
+          const decoded = decodeURIComponent(current);
+          if (decoded === current) break;
+          current = decoded;
+        } catch {
+          break;
+        }
+      }
+      return current;
+    }
 
-      const isLocalPdf = /^file:\/\//i.test(pdfUrl) && /\.pdf(?:[?#].*)?$/i.test(pdfUrl);
-      if (!isLocalPdf) return;
+    normalizeAutoOpenPdfUrl(rawUrl) {
+      if (!rawUrl || typeof rawUrl !== 'string') return null;
+
+      const decoded = this.decodeUrlForLocalFile(rawUrl.trim());
+      if (!decoded) return null;
+
+      const uncMatch = decoded.match(/^\\\\+([^\\\/]+)[\\\/]+(.+)$/);
+      if (uncMatch) {
+        const host = uncMatch[1];
+        const pathPart = uncMatch[2]
+          .split(/[\\\/]+/)
+          .filter(Boolean)
+          .map((segment) => encodeURIComponent(segment))
+          .join('/');
+        const uncUrl = `file://${host}/${pathPart}`;
+        return /\.pdf(?:[?#].*)?$/i.test(uncUrl) ? uncUrl : null;
+      }
+
+      if (!/^file:\/\//i.test(decoded)) return null;
+
+      let candidate = decoded.replace(/\\/g, '/');
+      const weirdUncMatch = candidate.match(/^file:\/{4,}([^/]+)\/(.+)$/i);
+      if (weirdUncMatch) {
+        candidate = `file://${weirdUncMatch[1]}/${weirdUncMatch[2]}`;
+      }
 
       try {
-        const response = await fetch(pdfUrl, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const bytes = new Uint8Array(await response.arrayBuffer());
-        const fileName = this.getFileNameFromPdfUrl(pdfUrl);
-        await this.loadPdf(bytes, fileName, true);
-      } catch (err) {
-        const detail = (err && err.message) ? err.message : String(err);
-        await showAlert(
-          'Không thể tự mở PDF local',
-          'Extension không thể đọc file PDF từ tab hiện tại.\n\n'
-            + '1) Bật quyền "Allow access to file URLs" cho extension trong chrome://extensions.\n'
-            + '2) Mở lại file PDF local rồi click lại icon extension.\n\n'
-            + `Chi tiết: ${detail}`
-        );
+        const parsed = new URL(candidate);
+        if (parsed.protocol !== 'file:') return null;
+
+        const pathname = decodeURIComponent((parsed.pathname || '').replace(/\\/g, '/'));
+        if (!/\.pdf$/i.test(pathname)) return null;
+
+        return parsed.href;
+      } catch {
+        return /\.pdf(?:[?#].*)?$/i.test(candidate) ? candidate : null;
       }
+    }
+
+    extractAutoOpenPdfUrlFromTabUrl(tabUrl) {
+      if (!tabUrl || typeof tabUrl !== 'string') return null;
+
+      const direct = this.normalizeAutoOpenPdfUrl(tabUrl);
+      if (direct) return direct;
+
+      try {
+        const parsed = new URL(tabUrl);
+        const candidateKeys = ['src', 'file', 'url'];
+
+        for (const key of candidateKeys) {
+          const value = parsed.searchParams.get(key);
+          const normalized = this.normalizeAutoOpenPdfUrl(value);
+          if (normalized) return normalized;
+        }
+
+        if (parsed.hash && parsed.hash.length > 1) {
+          const hashParams = new URLSearchParams(parsed.hash.slice(1));
+          for (const key of candidateKeys) {
+            const value = hashParams.get(key);
+            const normalized = this.normalizeAutoOpenPdfUrl(value);
+            if (normalized) return normalized;
+          }
+        }
+      } catch {
+        // Ignore malformed URL values.
+      }
+
+      const decoded = this.decodeUrlForLocalFile(tabUrl);
+      const embedded = decoded.match(/(?:file:(?:\/\/\/|\/\/)[^\s"'<>]+|\\\\+[^\s"'<>]+\.pdf(?:[?#][^\s"'<>]*)?)/i);
+      if (embedded) {
+        return this.normalizeAutoOpenPdfUrl(embedded[0]);
+      }
+
+      return null;
+    }
+
+    extractUncPathFromFileUrl(fileUrl) {
+      if (!fileUrl || typeof fileUrl !== 'string') return null;
+
+      try {
+        const parsed = new URL(fileUrl);
+        if (parsed.protocol !== 'file:') return null;
+
+        if (parsed.host) {
+          const relPath = decodeURIComponent((parsed.pathname || '').replace(/^\/+/, '')).replace(/\//g, '\\');
+          if (!relPath) return null;
+          return `\\\\${parsed.host}\\${relPath}`;
+        }
+
+        const rawPath = decodeURIComponent(parsed.pathname || '');
+        const uncMatch = rawPath.match(/^\/+\\\\+([^\\\/]+)[\\\/]+(.+)$/);
+        if (uncMatch) {
+          const relPath = uncMatch[2].replace(/\//g, '\\');
+          return `\\\\${uncMatch[1]}\\${relPath}`;
+        }
+      } catch {
+        return null;
+      }
+
+      return null;
+    }
+
+    buildAutoOpenPdfUrlCandidates(fileUrl) {
+      const candidates = [];
+      const seen = new Set();
+
+      const pushCandidate = (value) => {
+        if (!value || typeof value !== 'string') return;
+        if (!/^file:\/\//i.test(value)) return;
+        if (seen.has(value)) return;
+        seen.add(value);
+        candidates.push(value);
+      };
+
+      pushCandidate(fileUrl);
+
+      const decoded = this.decodeUrlForLocalFile(fileUrl);
+      if (decoded !== fileUrl) {
+        pushCandidate(decoded);
+      }
+
+      const uncPath = this.extractUncPathFromFileUrl(fileUrl);
+      if (uncPath) {
+        const uncBody = uncPath.replace(/^\\\\+/, '');
+        const parts = uncBody.split('\\').filter(Boolean);
+        if (parts.length >= 2) {
+          const host = parts.shift();
+          const encodedPath = parts.map((segment) => encodeURIComponent(segment)).join('/');
+          pushCandidate(`file://${host}/${encodedPath}`);
+          pushCandidate(`file:////${host}/${encodedPath}`);
+        }
+      }
+
+      return candidates;
+    }
+
+    isNetworkSharePdfUrl(fileUrl) {
+      if (!fileUrl || typeof fileUrl !== 'string') return false;
+
+      if (this.extractUncPathFromFileUrl(fileUrl)) {
+        return true;
+      }
+
+      try {
+        const parsed = new URL(fileUrl);
+        if (parsed.protocol !== 'file:') return false;
+        const host = (parsed.host || '').toLowerCase();
+        if (!host) return false;
+        return host !== 'localhost' && host !== '127.0.0.1' && host !== '[::1]';
+      } catch {
+        return false;
+      }
+    }
+
+    async fetchPdfBytesFromCandidates(urlCandidates) {
+      let lastError = null;
+
+      for (const candidate of urlCandidates) {
+        try {
+          const response = await fetch(candidate, { cache: 'no-store' });
+          if (!response.ok) throw new Error(`HTTP ${response.status}`);
+          const bytes = new Uint8Array(await response.arrayBuffer());
+          return { bytes, url: candidate };
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      if (lastError) throw lastError;
+      throw new Error('Không có URL file phù hợp để mở tự động.');
+    }
+
+    async resolveAutoOpenPdfUrlFromBackground(sourceTabId) {
+      if (!Number.isInteger(sourceTabId) || sourceTabId < 0) return null;
+      if (!(typeof chrome !== 'undefined' && chrome.runtime && typeof chrome.runtime.sendMessage === 'function')) {
+        return null;
+      }
+
+      try {
+        const response = await new Promise((resolve) => {
+          chrome.runtime.sendMessage(
+            { type: RESOLVE_TAB_PDF_URL_MESSAGE, tabId: sourceTabId },
+            (result) => {
+              const runtimeError = chrome.runtime && chrome.runtime.lastError
+                ? chrome.runtime.lastError
+                : null;
+              if (runtimeError) {
+                resolve({ ok: false, error: runtimeError.message || 'runtime-send-message-failed' });
+                return;
+              }
+              resolve(result || null);
+            }
+          );
+        });
+
+        if (!response || response.ok !== true) return null;
+        return this.normalizeAutoOpenPdfUrl(response.pdfUrl);
+      } catch {
+        return null;
+      }
+    }
+
+    async tryAutoOpenFromPdfUrl(pdfUrl) {
+      const normalized = this.normalizeAutoOpenPdfUrl(pdfUrl);
+      if (!normalized) throw new Error('URL PDF tự mở không hợp lệ.');
+
+      const candidates = this.buildAutoOpenPdfUrlCandidates(normalized);
+      if (!candidates.length) throw new Error('Không có URL file phù hợp để mở tự động.');
+
+      const loaded = await this.fetchPdfBytesFromCandidates(candidates);
+      const fileName = this.getFileNameFromPdfUrl(loaded.url || normalized);
+
+      // Keep storage behavior aligned with the Open PDF action by providing a File source.
+      const sourceFile = new File([loaded.bytes], fileName, { type: 'application/pdf' });
+      await this.loadPdf(loaded.bytes, fileName, true, { sourceFile });
+      return normalized;
+    }
+
+    async tryAutoOpenFromLaunchContext() {
+      const rawPdfUrl = this.getAutoOpenPdfUrlFromQuery();
+      const rawSourceTabUrl = this.getAutoOpenSourceTabUrlFromQuery();
+      const sourceTabId = this.getAutoOpenSourceTabIdFromQuery();
+
+      const hasLaunchHints = !!rawPdfUrl || !!rawSourceTabUrl || Number.isInteger(sourceTabId);
+      if (!hasLaunchHints) return;
+      this.clearAutoOpenPdfUrlFromQuery();
+
+      const retryUrls = [];
+      const seen = new Set();
+
+      const pushRetryUrl = (value) => {
+        const normalized = this.normalizeAutoOpenPdfUrl(value);
+        if (!normalized || seen.has(normalized)) return;
+        seen.add(normalized);
+        retryUrls.push(normalized);
+      };
+
+      pushRetryUrl(rawPdfUrl);
+      pushRetryUrl(this.extractAutoOpenPdfUrlFromTabUrl(rawSourceTabUrl));
+
+      if (!retryUrls.length && Number.isInteger(sourceTabId)) {
+        const resolved = await this.resolveAutoOpenPdfUrlFromBackground(sourceTabId);
+        pushRetryUrl(resolved);
+      }
+
+      if (!retryUrls.length) return;
+
+      let attemptedUrl = retryUrls[0];
+      let lastError = null;
+
+      for (const candidate of retryUrls) {
+        attemptedUrl = candidate;
+        try {
+          await this.tryAutoOpenFromPdfUrl(candidate);
+          return;
+        } catch (err) {
+          lastError = err;
+        }
+      }
+
+      if (Number.isInteger(sourceTabId)) {
+        const resolvedUrl = await this.resolveAutoOpenPdfUrlFromBackground(sourceTabId);
+        if (resolvedUrl && !seen.has(resolvedUrl)) {
+          attemptedUrl = resolvedUrl;
+          try {
+            await this.tryAutoOpenFromPdfUrl(resolvedUrl);
+            return;
+          } catch (err) {
+            lastError = err;
+          }
+        }
+      }
+
+      const detail = (lastError && lastError.message) ? lastError.message : String(lastError || 'unknown error');
+
+      if (this.isNetworkSharePdfUrl(attemptedUrl)) {
+        await showAlert(
+          'Không thể tự mở PDF từ thư mục mạng LAN',
+          'Extension đã thử lấy lại đường dẫn PDF thật từ tab browser, nhưng vẫn không thể đọc trực tiếp file mạng LAN (UNC).\n\n'
+          + 'Hướng xử lý tạm thời:\n'
+          + '1) Copy file PDF về ổ đĩa local rồi mở lại.\n'
+          + '2) Hoặc map thư mục mạng thành ổ đĩa local rồi mở lại file.\n\n'
+          + `Chi tiết: ${detail}`
+        );
+        return;
+      }
+
+      await showAlert(
+        'Không thể tự mở PDF local',
+        'Extension không thể đọc file PDF từ tab hiện tại.\n\n'
+        + '1) Bật quyền "Allow access to file URLs" cho extension trong chrome://extensions.\n'
+        + '2) Mở lại file PDF local rồi click lại icon extension.\n\n'
+        + `Chi tiết: ${detail}`
+      );
     }
 
     startRuntimeStatsMonitor() {
@@ -1163,21 +1980,22 @@
 
       const metric = this._memoryMetric || { kind: 'na' };
       if (metric.kind === 'context') {
-        const est = this.formatBytes(metric.taskMgrEstimateBytes || metric.bytesUsed);
-        this.dom.perfRam.textContent = `${est} (tm~)`;
-        this.dom.perfRam.title = `raw ctx ${this.formatBytes(metric.bytesUsed)}; scoped ${this.formatBytes(metric.scopedBytes)}; canvas ${this.formatBytes(metric.canvasBytes)}; buffer ${this.formatBytes(metric.bufferBytes)}.`;
+        const raw = this.formatBytes(metric.bytesUsed);
+        const tmEst = this.formatBytes(metric.taskMgrEstimateBytes || metric.bytesUsed);
+        this.dom.perfRam.textContent = `${raw} (ctx)`;
+        this.dom.perfRam.title = `Không thể đọc trực tiếp Browser Task Manager. Hiển thị context memory ${raw}; tm~ ${tmEst}; scoped ${this.formatBytes(metric.scopedBytes)}; canvas ${this.formatBytes(metric.canvasBytes)}; buffer ${this.formatBytes(metric.bufferBytes)}.`;
         return;
       }
 
       if (metric.kind === 'heap-est') {
         const est = this.formatBytes(metric.taskMgrEstimateBytes || metric.bytesUsed);
         this.dom.perfRam.textContent = `${est} (tm~)`;
-        this.dom.perfRam.title = `raw heap+ ${this.formatBytes(metric.bytesUsed)} (heap ${this.formatBytes(metric.heapBytes)} + canvas ${this.formatBytes(metric.canvasBytes)} + buffer ${this.formatBytes(metric.bufferBytes)}).`;
+        this.dom.perfRam.title = `Không thể đọc trực tiếp Browser Task Manager. Đây là số ước lượng tm~ từ heap ${this.formatBytes(metric.heapBytes)} + canvas ${this.formatBytes(metric.canvasBytes)} + buffer ${this.formatBytes(metric.bufferBytes)}.`;
         return;
       }
 
       this.dom.perfRam.textContent = 'N/A';
-      this.dom.perfRam.title = 'Trình duyệt không hỗ trợ API đủ để ước lượng RAM kiểu Task Manager.';
+      this.dom.perfRam.title = 'Trình duyệt không hỗ trợ API cần thiết để đọc context memory hoặc ước lượng tm~.';
     }
 
     renderRuntimeStats(resetWindow) {
@@ -1206,15 +2024,32 @@
     }
 
     async handlePurgeMemoryClick() {
-      if (this._purgeInProgress) return;
       if (!this.hasPdfSource()) {
         await showAlert('Thông báo', 'Chưa có file PDF để dọn cache.');
         return;
       }
 
+      await this.purgeMemory({
+        auto: false,
+        source: 'manual-button',
+        preserveViewport: false,
+        showErrorAlert: true,
+      });
+    }
+
+    async purgeMemory(opts) {
+      if (this._purgeInProgress) return false;
+      if (!this.hasPdfSource()) return false;
+
+      const options = opts || {};
+      const isAuto = !!options.auto;
+      const preserveViewport = !!options.preserveViewport;
+      const showErrorAlert = options.showErrorAlert !== false;
+      const viewportState = preserveViewport ? this.captureViewportState() : null;
+
       this._purgeInProgress = true;
       const btn = this.dom.btnPurgeMemory;
-      if (btn) {
+      if (btn && !isAuto) {
         btn.disabled = true;
         btn.textContent = 'Purging...';
       }
@@ -1237,6 +2072,9 @@
             this.selectedPages.add(vi);
           }
         });
+        if (viewportState) {
+          this.restoreViewportState(viewportState);
+        }
         this.updateSelectedCount();
 
         if (typeof window !== 'undefined' && typeof window.gc === 'function') {
@@ -1245,11 +2083,20 @@
         await this.sampleRuntimeMemory(true);
         this.updateMemoryDisplay();
         this.renderRuntimeStats(true);
+        if (isAuto) {
+          this._lastAutoPurgeAt = Date.now();
+        }
+        return true;
       } catch (err) {
-        await showAlert('Lỗi', 'Không thể dọn cache memory:\n' + err.message);
+        if (showErrorAlert) {
+          await showAlert('Lỗi', 'Không thể dọn cache memory:\n' + err.message);
+        } else {
+          console.warn('Auto purge memory failed:', options.source || 'auto', err);
+        }
+        return false;
       } finally {
         this._purgeInProgress = false;
-        if (btn) {
+        if (btn && !isAuto) {
           btn.textContent = 'Purge Memory';
           btn.disabled = !this.hasPdfSource();
         }
@@ -1260,45 +2107,67 @@
       return !!(this.pdfBytes || this._workingPdfOpfsFile || this.pdfDoc);
     }
 
+    async assignWorkingOpfsFile(opfsFile, resetOriginal) {
+      if (!opfsFile) return false;
+
+      if (resetOriginal) {
+        const prevWorking = this._workingPdfOpfsFile;
+        const prevOriginal = this._originalPdfOpfsFile;
+
+        this._workingPdfOpfsFile = opfsFile;
+        this._originalPdfOpfsFile = opfsFile;
+
+        if (prevWorking && prevWorking !== opfsFile) {
+          await deleteOpfsFile(prevWorking);
+        }
+        if (prevOriginal && prevOriginal !== prevWorking && prevOriginal !== opfsFile) {
+          await deleteOpfsFile(prevOriginal);
+        }
+      } else {
+        if (this._workingPdfOpfsFile && this._workingPdfOpfsFile !== this._originalPdfOpfsFile) {
+          await deleteOpfsFile(this._workingPdfOpfsFile);
+        }
+        this._workingPdfOpfsFile = opfsFile;
+        if (!this._originalPdfOpfsFile) this._originalPdfOpfsFile = opfsFile;
+      }
+
+      this.pdfBytes = null;
+      if (resetOriginal) this.originalPdfBytes = null;
+      this.sourceStorageMode = 'opfs';
+      this.updateLazyRenderStatus();
+      return true;
+    }
+
+    async setWorkingSourceFile(file, opts) {
+      const resetOriginal = !!(opts && opts.resetOriginal);
+      const opfsFile = await writeFileToOpfs(file, 'manager-work');
+      if (await this.assignWorkingOpfsFile(opfsFile, resetOriginal)) {
+        return;
+      }
+
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      await this.setWorkingSourceBytes(bytes, opts);
+    }
+
     async setWorkingSourceBytes(bytes, opts) {
       const resetOriginal = !!(opts && opts.resetOriginal);
       const opfsFile = await writeBytesToOpfs(bytes, 'manager-work');
 
-      if (opfsFile) {
-        if (resetOriginal) {
-          const prevWorking = this._workingPdfOpfsFile;
-          const prevOriginal = this._originalPdfOpfsFile;
-
-          this._workingPdfOpfsFile = opfsFile;
-          this._originalPdfOpfsFile = opfsFile;
-
-          if (prevWorking && prevWorking !== opfsFile) {
-            await deleteOpfsFile(prevWorking);
-          }
-          if (prevOriginal && prevOriginal !== prevWorking && prevOriginal !== opfsFile) {
-            await deleteOpfsFile(prevOriginal);
-          }
-        } else {
-          if (this._workingPdfOpfsFile && this._workingPdfOpfsFile !== this._originalPdfOpfsFile) {
-            await deleteOpfsFile(this._workingPdfOpfsFile);
-          }
-          this._workingPdfOpfsFile = opfsFile;
-          if (!this._originalPdfOpfsFile) this._originalPdfOpfsFile = opfsFile;
-        }
-
-        this.pdfBytes = null;
-        if (resetOriginal) this.originalPdfBytes = null;
+      if (await this.assignWorkingOpfsFile(opfsFile, resetOriginal)) {
         return;
       }
 
       // Fallback for environments without OPFS support.
       this.pdfBytes = bytes;
       this._workingPdfOpfsFile = null;
+      this.sourceStorageMode = 'memory';
 
       if (resetOriginal) {
         this.originalPdfBytes = bytes.slice();
         this._originalPdfOpfsFile = null;
       }
+
+      this.updateLazyRenderStatus();
     }
 
     async readWorkingBytes() {
@@ -1308,6 +2177,25 @@
       }
       if (this.pdfBytes) return this.pdfBytes.slice();
       return null;
+    }
+
+    async getRasterWorkerSourceInput() {
+      if (this._workingPdfOpfsFile) {
+        const sourceUrl = await createObjectUrlFromOpfs(this._workingPdfOpfsFile);
+        if (sourceUrl) {
+          return {
+            sourceUrl,
+            cleanup: () => revokeTempObjectUrl(sourceUrl),
+          };
+        }
+      }
+
+      const bytes = await this.readWorkingBytes();
+      if (!bytes) return null;
+      return {
+        bytes,
+        cleanup: null,
+      };
     }
 
     async readOriginalBytes() {
@@ -1326,12 +2214,16 @@
         }
         this._workingPdfOpfsFile = this._originalPdfOpfsFile;
         this.pdfBytes = null;
+        this.sourceStorageMode = 'opfs';
+        this.updateLazyRenderStatus();
         return true;
       }
 
       if (this.originalPdfBytes) {
         this.pdfBytes = this.originalPdfBytes.slice();
         this._workingPdfOpfsFile = null;
+        this.sourceStorageMode = 'memory';
+        this.updateLazyRenderStatus();
         return true;
       }
 
@@ -1354,11 +2246,13 @@
           const bytes = await this.readWorkingBytes();
           if (!bytes) throw new Error('Không thể đọc file PDF trong OPFS.');
           this.pdfBytes = bytes;
+          this.sourceStorageMode = 'memory';
           loadOpts.data = bytes.slice();
         }
       } else {
         const bytes = await this.readWorkingBytes();
         if (!bytes) throw new Error('Không có dữ liệu PDF để hiển thị.');
+        this.sourceStorageMode = 'memory';
         loadOpts.data = bytes.slice();
       }
 
@@ -1366,6 +2260,7 @@
       const loadingTask = pdfjsLib.getDocument(loadOpts);
       this.pdfDoc = await loadingTask.promise;
       await this.updateDefaultPageAspect();
+      this.updateLazyRenderStatus();
     }
 
     async updateDefaultPageAspect() {
@@ -1402,6 +2297,10 @@
         revokeTempObjectUrl(this._pdfSourceUrl);
         this._pdfSourceUrl = null;
       }
+
+      this.sourceStorageMode = 'none';
+      this.currentColumnCount = 0;
+      this.updateLazyRenderStatus();
     }
 
     // === Drag and Drop ===
@@ -1448,7 +2347,7 @@
       try {
         if (pdfFiles.length === 1) {
           const bytes = new Uint8Array(await pdfFiles[0].arrayBuffer());
-          await this.loadPdf(bytes, pdfFiles[0].name, true);
+          await this.loadPdf(bytes, pdfFiles[0].name, true, { sourceFile: pdfFiles[0] });
         } else {
           // Merge multiple files into one
           const combined = await this.combineFiles(pdfFiles);
@@ -1469,7 +2368,7 @@
       }
     }
 
-    async loadPdf(bytes, name, isNewOpen) {
+    async loadPdf(bytes, name, isNewOpen, opts) {
       // Unlock encrypted PDF if needed
       this._pdfPassword = '';
       this._isEncrypted = false;
@@ -1483,13 +2382,20 @@
       }
 
       // Close previous
-      this.destroyPdfDoc();
       this.cleanupPageElements();
+      await this.destroyPdfDoc();
 
       if (isNewOpen) {
         await this.clearPdfSources();
       }
-      await this.setWorkingSourceBytes(safeBytes, { resetOriginal: isNewOpen });
+
+      const sourceFile = opts && opts.sourceFile;
+      const canReuseSourceFile = !!(sourceFile && safeBytes === bytes && isNewOpen);
+      if (canReuseSourceFile) {
+        await this.setWorkingSourceFile(sourceFile, { resetOriginal: isNewOpen });
+      } else {
+        await this.setWorkingSourceBytes(safeBytes, { resetOriginal: isNewOpen });
+      }
 
       if (isNewOpen) {
         this.fileName = name;
@@ -1534,7 +2440,7 @@
       try {
         const task = pdfjsLib.getDocument({ data: bytes.slice() });
         const doc = await task.promise;
-        doc.destroy();
+        await doc.destroy();
       } catch (e) {
         if (e && e.name === 'PasswordException') {
           const result = await showPasswordPrompt(
@@ -1545,7 +2451,7 @@
           try {
             const task2 = pdfjsLib.getDocument({ data: bytes.slice(), password: result.input });
             const doc2 = await task2.promise;
-            doc2.destroy();
+            await doc2.destroy();
             this._pdfPassword = result.input;
           } catch {
             await showAlert('Lỗi', 'Password không đúng hoặc file không thể mở.');
@@ -1579,7 +2485,7 @@
           p.cleanup();
           valid = ops.fnArray.length > 2;
         }
-        vDoc.destroy();
+        await vDoc.destroy();
         if (valid) return cleaned;
       } catch { /* fall through */ }
 
@@ -1597,9 +2503,21 @@
         if (r === null) return;
         if (r === true) await this.savePdf();
       }
-      this.destroyPdfDoc();
       this.cleanupPageElements();
+      await this.destroyPdfDoc();
+      if (this.zoomTimer) {
+        clearTimeout(this.zoomTimer);
+        this.zoomTimer = null;
+      }
+      this._wheelZoomAccumulatorPx = 0;
+      this._lastWheelZoomAt = 0;
+      if (this._autoPurgeTimer) {
+        clearTimeout(this._autoPurgeTimer);
+        this._autoPurgeTimer = null;
+      }
+      this._lastAutoPurgeAt = 0;
       await this.clearPdfSources();
+      revokeAllTempObjectUrls();
       this.fileName = '';
       this.openedFileCount = 0;
       this.pageOrder = [];
@@ -1617,24 +2535,55 @@
       this.updatePageCount();
       this.updateSelectedCount();
       this.showEmptyPlaceholder(true);
+      await this.sampleRuntimeMemory(true);
+      this.renderRuntimeStats(true);
     }
 
-    destroyPdfDoc() {
-      if (this.pdfDoc) {
-        this.pdfDoc.destroy();
-        this.pdfDoc = null;
+    async destroyPdfDoc() {
+      const currentDoc = this.pdfDoc;
+      this.pdfDoc = null;
+
+      if (currentDoc) {
+        try {
+          if (typeof currentDoc.cleanup === 'function') await currentDoc.cleanup();
+        } catch {
+          // Ignore cleanup errors before hard destroy.
+        }
+
+        try {
+          if (typeof currentDoc.destroy === 'function') await currentDoc.destroy();
+        } catch {
+          // Ignore destroy errors to keep teardown resilient.
+        }
       }
+
       if (this._pdfSourceUrl) {
         revokeTempObjectUrl(this._pdfSourceUrl);
         this._pdfSourceUrl = null;
       }
     }
 
-    dispose() {
+    async dispose() {
       this.stopRuntimeStatsMonitor();
-      this.destroyPdfDoc();
+      this.teardownScrollReleaseRefresh();
       this.cleanupPageElements();
-      this.clearPdfSources().catch(() => { /* ignore */ });
+      await this.destroyPdfDoc();
+      if (this.zoomTimer) {
+        clearTimeout(this.zoomTimer);
+        this.zoomTimer = null;
+      }
+      this._wheelZoomAccumulatorPx = 0;
+      this._lastWheelZoomAt = 0;
+      if (this._autoPurgeTimer) {
+        clearTimeout(this._autoPurgeTimer);
+        this._autoPurgeTimer = null;
+      }
+      this._lastAutoPurgeAt = 0;
+      try {
+        await this.clearPdfSources();
+      } catch {
+        // Ignore cleanup failures during disposal.
+      }
       this.fileName = '';
       this.openedFileCount = 0;
       this.pageOrder = [];
@@ -1645,6 +2594,14 @@
       if (this._onPageHide) {
         window.removeEventListener('pagehide', this._onPageHide, true);
         this._onPageHide = null;
+      }
+      if (this._onResize) {
+        window.removeEventListener('resize', this._onResize, true);
+        this._onResize = null;
+      }
+      if (this._resizeTimer) {
+        clearTimeout(this._resizeTimer);
+        this._resizeTimer = null;
       }
     }
 
@@ -1685,27 +2642,39 @@
       }
     }
 
-    // === Column count based on zoom level ===
+    // === Column count based on thumbnail size and available width ===
     getColumnCount() {
-      const zoom = Math.round(this.zoomLevel * 100);
-      if (zoom <= 25) return 6;
-      if (zoom <= 50) return 4;
-      if (zoom <= 80) return 3;
-      if (zoom < 150) return 2;
-      return 1;
+      const wrapperWidth = this.dom.pagesWrapper ? this.dom.pagesWrapper.clientWidth : 0;
+      const availableWidth = Math.max(0, wrapperWidth - 32); // pages-grid has 16px horizontal padding on each side.
+      if (!availableWidth) return 1;
+
+      const safeAspect = this.defaultPageAspect > 0 ? this.defaultPageAspect : Math.sqrt(2);
+      const perf = getActivePerfProfile();
+      const previewDims = computePreviewDimensionsWithFallback(
+        perf.previewBaseWidth,
+        this.zoomLevel,
+        safeAspect,
+        0
+      );
+      const cardWidth = Math.max(1, previewDims.width + CARD_WIDTH_PADDING_PX);
+      return Math.max(1, Math.floor(availableWidth / cardWidth));
     }
 
     async buildPageGrid(preserveSelection) {
       this.cleanupPageElements();
 
       if (!this.pdfDoc || !this.pageOrder.length) {
+        this.currentColumnCount = 0;
+        this.updateLazyRenderStatus();
         this.showEmptyPlaceholder(true);
         return;
       }
 
       // Set grid columns based on zoom level
       const cols = this.getColumnCount();
+      this.currentColumnCount = cols;
       this.dom.pagesGrid.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      this.updateLazyRenderStatus();
 
       // Detect single-row scenario for height constraint
       const rows = Math.ceil(this.pageOrder.length / cols);
@@ -1727,11 +2696,15 @@
 
       // Use a cached aspect ratio from page 1 to avoid loading every page just for placeholders.
       const safeAspect = this.defaultPageAspect > 0 ? this.defaultPageAspect : Math.sqrt(2);
-      const rotated = ((rotation % 180) + 180) % 180 !== 0;
-      const aspect = rotated ? (1 / safeAspect) : safeAspect;
       const perf = getActivePerfProfile();
-      const pageWidth = Math.max(140, Math.round(perf.previewBaseWidth * this.zoomLevel));
-      const pageHeight = Math.max(180, Math.round(pageWidth * aspect));
+      const previewDims = computePreviewDimensionsWithFallback(
+        perf.previewBaseWidth,
+        this.zoomLevel,
+        safeAspect,
+        rotation
+      );
+      const pageWidth = previewDims.width;
+      const pageHeight = previewDims.height;
 
       // Card container
       const container = document.createElement('div');
@@ -1851,13 +2824,28 @@
     }
 
     computeRenderWindowIndices() {
-      const allowed = new Set();
       const total = this.pageElements.length;
-      if (!total) return allowed;
+      if (!total) return new Set();
 
       const perf = getActivePerfProfile();
       const hardCap = Math.max(1, perf.renderWindowHardCapPages || perf.maxRenderedPages || 6);
       const padding = Math.max(0, perf.renderWindowPaddingPages || 0);
+      const allowedByWasm = computeRenderWindowWithFallback(
+        total,
+        this.visibleVisualIndices,
+        hardCap,
+        padding
+      );
+
+      if (allowedByWasm) {
+        return allowedByWasm;
+      }
+
+      return this.computeRenderWindowIndicesFallback(total, hardCap, padding);
+    }
+
+    computeRenderWindowIndicesFallback(total, hardCap, padding) {
+      const allowed = new Set();
       const visible = Array.from(this.visibleVisualIndices).sort((a, b) => a - b);
 
       let start = 0;
@@ -1892,6 +2880,12 @@
     refreshRenderWindow() {
       if (!this.pageElements.length) return;
 
+      const perf = getActivePerfProfile();
+      const hardCap = Math.max(1, perf.renderWindowHardCapPages || perf.maxRenderedPages || 6);
+      if (this.visibleVisualIndices.size > (hardCap * 3)) {
+        this.syncVisibleIndicesWithViewport();
+      }
+
       this.allowedRenderIndices = this.computeRenderWindowIndices();
       const allowed = this.allowedRenderIndices;
 
@@ -1914,6 +2908,7 @@
         });
 
       this.pumpRenderQueue();
+      this.updateLazyRenderStatus();
     }
 
     selectRange(from, to) {
@@ -1955,7 +2950,9 @@
       });
 
       this.pageElements.forEach(el => this.observer.observe(el.container));
+      this.syncVisibleIndicesWithViewport();
       this.refreshRenderWindow();
+      ensureWasmHelpers().then(() => this.refreshRenderWindow()).catch(() => { /* ignore */ });
     }
 
     queueRenderPage(visualIdx) {
@@ -2420,7 +3417,7 @@
 
         // Reload with merged PDF
         this.hasUnsavedAppend = true;
-        this.destroyPdfDoc();
+        await this.destroyPdfDoc();
         await this.setWorkingSourceBytes(mergedBytes, { resetOriginal: false });
         await this.loadPdfDocumentFromSource();
 
@@ -2466,21 +3463,29 @@
         this.pageOrder.forEach((origIdx, newIdx) => pageIndexMap.set(origIdx, newIdx));
 
         if (this._isEncrypted) {
-          const sourceBytes = await this.readWorkingBytes();
-          if (!sourceBytes) throw new Error('Không thể đọc dữ liệu PDF mã hóa để lưu file.');
+          const sourceInput = await this.getRasterWorkerSourceInput();
+          if (!sourceInput) throw new Error('Không thể đọc dữ liệu PDF mã hóa để lưu file.');
 
           const perf = getActivePerfProfile();
           const exportScale = getAdaptiveExportScale(this.pageOrder.length);
-          const workerBytes = await runRasterWorkerTask({
-            type: 'encrypted-save-rasterize',
-            bytes: sourceBytes,
-            password: this._pdfPassword || '',
-            pageOrder: this.pageOrder,
-            rotations: this.rotationStates,
-            quality: perf.exportJpegQuality,
-            maxPixels: perf.exportCanvasPixels,
-            scaleHint: exportScale,
-          });
+          let workerBytes = null;
+          try {
+            workerBytes = await runRasterWorkerTask({
+              type: 'encrypted-save-rasterize',
+              bytes: sourceInput.bytes || null,
+              sourceUrl: sourceInput.sourceUrl || null,
+              password: this._pdfPassword || '',
+              pageOrder: this.pageOrder,
+              rotations: this.rotationStates,
+              quality: perf.exportJpegQuality,
+              maxPixels: perf.exportCanvasPixels,
+              scaleHint: exportScale,
+            });
+          } finally {
+            if (typeof sourceInput.cleanup === 'function') {
+              sourceInput.cleanup();
+            }
+          }
 
           if (workerBytes) {
             const outDoc = await PDFLib.PDFDocument.load(workerBytes, { ignoreEncryption: true });
@@ -2548,10 +3553,12 @@
     // === Zoom ===
     applyZoom() {
       if (this.zoomTimer) { clearTimeout(this.zoomTimer); this.zoomTimer = null; }
+      this._wheelZoomAccumulatorPx = 0;
+      this._lastWheelZoomAt = 0;
 
       const val = parseInt(this.dom.zoomInput.value, 10);
-      if (isNaN(val) || val < 10 || val > 500) {
-        showAlert('Lỗi', 'Tỷ lệ zoom phải nằm trong khoảng 10% - 500%');
+      if (isNaN(val) || val < MIN_ZOOM_PERCENT || val > MAX_ZOOM_PERCENT) {
+        showAlert('Lỗi', `Tỷ lệ zoom phải nằm trong khoảng ${MIN_ZOOM_PERCENT}% - ${MAX_ZOOM_PERCENT}%`);
         return;
       }
 
@@ -2561,16 +3568,66 @@
         if (vi < this.pageOrder.length) preserveOrig.add(this.pageOrder[vi]);
       });
 
-      this.zoomLevel = val / 100;
+      const nextZoom = Math.round(Math.max(MIN_ZOOM_PERCENT, Math.min(MAX_ZOOM_PERCENT, val)));
+      this.zoomLevel = nextZoom / 100;
+      this.dom.zoomInput.value = String(nextZoom);
+      this.updateLazyRenderStatus();
       if (this.hasPdfSource()) this.rebuildWithPreservation(preserveOrig);
+    }
+
+    normalizeWheelDeltaToPixels(e) {
+      if (!e) return 0;
+      let delta = Number(e.deltaY) || 0;
+      if (e.deltaMode === 1) {
+        delta *= 16;
+      } else if (e.deltaMode === 2) {
+        const pageSize = this.dom.pagesWrapper ? this.dom.pagesWrapper.clientHeight : window.innerHeight;
+        delta *= Math.max(1, pageSize || 1);
+      }
+      return delta;
     }
 
     onMouseWheelZoom(e) {
       if (!this.hasPdfSource()) return;
 
-      const delta = e.deltaY < 0 ? 0.05 : -0.05;
-      this.zoomLevel = Math.max(0.10, Math.min(5.0, this.zoomLevel + delta));
-      this.dom.zoomInput.value = Math.round(this.zoomLevel * 100);
+      const now = Date.now();
+      if (!this._lastWheelZoomAt || (now - this._lastWheelZoomAt) > WHEEL_ZOOM_IDLE_RESET_MS) {
+        this._wheelZoomAccumulatorPx = 0;
+      }
+      this._lastWheelZoomAt = now;
+
+      const deltaPx = this.normalizeWheelDeltaToPixels(e);
+      if (!Number.isFinite(deltaPx) || Math.abs(deltaPx) < 0.5) return;
+
+      this._wheelZoomAccumulatorPx += -deltaPx;
+
+      let steps = 0;
+      while (
+        Math.abs(this._wheelZoomAccumulatorPx) >= WHEEL_ZOOM_PIXELS_PER_STEP
+        && Math.abs(steps) < WHEEL_ZOOM_MAX_STEPS_PER_EVENT
+      ) {
+        const direction = this._wheelZoomAccumulatorPx > 0 ? 1 : -1;
+        this._wheelZoomAccumulatorPx -= direction * WHEEL_ZOOM_PIXELS_PER_STEP;
+        steps += direction;
+      }
+
+      if (!steps) return;
+
+      const currentZoomPercent = Math.round(this.zoomLevel * 100);
+      const step = steps * ZOOM_STEP_PERCENT;
+      const nextZoomPercent = Math.max(
+        MIN_ZOOM_PERCENT,
+        Math.min(MAX_ZOOM_PERCENT, currentZoomPercent + step)
+      );
+
+      if (nextZoomPercent === currentZoomPercent) {
+        this._wheelZoomAccumulatorPx = 0;
+        return;
+      }
+
+      this.zoomLevel = nextZoomPercent / 100;
+      this.dom.zoomInput.value = String(nextZoomPercent);
+      this.updateLazyRenderStatus();
 
       if (this.zoomTimer) clearTimeout(this.zoomTimer);
       this.zoomTimer = setTimeout(() => {
@@ -2580,7 +3637,7 @@
           if (vi < this.pageOrder.length) preserveOrig.add(this.pageOrder[vi]);
         });
         this.rebuildWithPreservation(preserveOrig);
-      }, 300);
+      }, WHEEL_ZOOM_APPLY_DELAY_MS);
     }
 
     // === Reset All ===
@@ -2596,8 +3653,8 @@
       );
       if (!confirmed) return;
 
-      this.destroyPdfDoc();
       this.cleanupPageElements();
+      await this.destroyPdfDoc();
 
       const restored = await this.restoreWorkingFromOriginal();
       if (!restored) {
@@ -2680,6 +3737,7 @@
   class PDFLockTool {
     constructor() {
       this.pdfBytes = null;
+      this._pdfOpfsFile = null;
       this.fileName = '';
       this.initialRestrictions = {};
       this.selectAllState = false;
@@ -2749,6 +3807,31 @@
       });
     }
 
+    async setLockSourceBytes(bytes) {
+      if (this._pdfOpfsFile) {
+        await deleteOpfsFile(this._pdfOpfsFile);
+        this._pdfOpfsFile = null;
+      }
+
+      const opfsFile = await writeBytesToOpfs(bytes, 'lock-src');
+      if (opfsFile) {
+        this._pdfOpfsFile = opfsFile;
+        this.pdfBytes = null;
+        return;
+      }
+
+      this.pdfBytes = bytes;
+    }
+
+    async readLockBytes() {
+      if (this._pdfOpfsFile) {
+        const bytes = await readBytesFromOpfs(this._pdfOpfsFile);
+        if (bytes) return bytes;
+      }
+      if (this.pdfBytes) return this.pdfBytes.slice();
+      return null;
+    }
+
     async openFiles(files) {
       const pdfFiles = files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
       if (!pdfFiles.length) {
@@ -2759,7 +3842,7 @@
       const file = pdfFiles[0];
       try {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        this.pdfBytes = bytes;
+        await this.setLockSourceBytes(bytes);
         this.fileName = file.name;
         this.dom.fileInfo.textContent = file.name;
         this.dom.fileInfo.style.color = '#000';
@@ -2814,7 +3897,7 @@
         }
 
         this.initialRestrictions = this.getCurrentRestrictions();
-        pdfDoc.destroy();
+        await pdfDoc.destroy();
 
         Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
       } catch (err) {
@@ -2854,7 +3937,8 @@
     }
 
     async lockPdf() {
-      if (!this.pdfBytes) {
+      const sourceBytes = await this.readLockBytes();
+      if (!sourceBytes) {
         await showAlert('Cảnh báo', 'Vui lòng chọn file PDF trước!');
         return;
       }
@@ -2900,9 +3984,9 @@
         args.push('--', 'input.pdf', 'output.pdf');
 
         // Prepare input data
-        const inputBuffer = this.pdfBytes.buffer.slice(
-          this.pdfBytes.byteOffset,
-          this.pdfBytes.byteOffset + this.pdfBytes.byteLength
+        const inputBuffer = sourceBytes.buffer.slice(
+          sourceBytes.byteOffset,
+          sourceBytes.byteOffset + sourceBytes.byteLength
         );
 
         console.log('[Lock PDF] Starting QPDF encryption...');
@@ -3062,7 +4146,7 @@
           `PDF đã được khóa thành công!\n\n` +
           `File: ${outputName}\n` +
           (password ? 'Password đã được thiết lập.\n' : 'Không yêu cầu password để mở (chỉ khóa restrictions).\n') +
-          `Restrictions: ${Object.entries(restrictions).filter(([,v]) => v).map(([k]) => k).join(', ') || 'Không có'}` +
+          `Restrictions: ${Object.entries(restrictions).filter(([, v]) => v).map(([k]) => k).join(', ') || 'Không có'}` +
           compatibilityText
         );
         this.clearForm();
@@ -3073,17 +4157,18 @@
     }
 
     async unlockPdf() {
-      if (!this.pdfBytes) {
+      const sourceBytes = await this.readLockBytes();
+      if (!sourceBytes) {
         await showAlert('Cảnh báo', 'Vui lòng chọn file PDF trước!');
         return;
       }
 
       try {
-        const unlockedBytes = await unlockPdfBytes(this.pdfBytes, this.fileName);
+        const unlockedBytes = await unlockPdfBytes(sourceBytes, this.fileName);
         if (!unlockedBytes) return; // user cancelled password entry
 
         // Check if actually changed (was it encrypted?)
-        if (unlockedBytes === this.pdfBytes) {
+        if (unlockedBytes === sourceBytes) {
           await showAlert('Thông báo', 'File PDF này không bị khóa.');
           return;
         }
@@ -3102,6 +4187,11 @@
 
     clearForm() {
       this.pdfBytes = null;
+      if (this._pdfOpfsFile) {
+        const staleFile = this._pdfOpfsFile;
+        this._pdfOpfsFile = null;
+        deleteOpfsFile(staleFile).catch(() => { /* ignore */ });
+      }
       this.fileName = '';
       this.initialRestrictions = {};
       this.selectAllState = false;

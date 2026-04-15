@@ -136,14 +136,28 @@ async function rasterizePdfJob(options) {
   }
 }
 
+async function resolveInputBytes(data) {
+  if (data && data.bytes) {
+    return new Uint8Array(data.bytes);
+  }
+
+  if (data && typeof data.sourceUrl === 'string' && data.sourceUrl) {
+    const response = await fetch(data.sourceUrl, { cache: 'no-store' });
+    if (!response.ok) {
+      throw new Error(`Cannot fetch PDF source URL (HTTP ${response.status}).`);
+    }
+    return new Uint8Array(await response.arrayBuffer());
+  }
+
+  throw new Error('Missing PDF input bytes for raster worker task.');
+}
+
 self.onmessage = async (event) => {
   const data = event && event.data ? event.data : {};
   const id = data.id;
 
   try {
-    if (!data || !data.bytes) throw new Error('Missing PDF bytes for raster worker task.');
-
-    const bytes = new Uint8Array(data.bytes);
+    const bytes = await resolveInputBytes(data);
     const output = await rasterizePdfJob({
       bytes,
       password: data.password || '',

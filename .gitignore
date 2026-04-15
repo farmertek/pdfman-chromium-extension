@@ -1,3 +1,5 @@
+.md/
 node_modules/
-*.md
-pdfman_sync_github.ps1
+*.ps1
+*.pem
+*.crx
