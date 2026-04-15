@@ -10,6 +10,7 @@ It is intentionally separate from any Python-based "PDF Manager" project.
 ## Related repositories
 
 - Browser extension repo (this project): https://github.com/farmertek/pdfman-chromium-extension
+- Official Chrome Web Store release: https://chromewebstore.google.com/detail/pdf-manager/amkgmjgmpbcmehekgmonmikfhoemehnh
 - Python repo: https://github.com/farmertek/pdfman-chromium-extension
 
 ## Main files
