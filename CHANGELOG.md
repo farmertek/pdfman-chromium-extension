@@ -8,6 +8,8 @@ All notable changes to PDF Manager extension are documented in this file.
 - Compatibility: when legacy QPDF environments reject 256-bit profile, lock flow retries with AES-128 (`--use-aes=y`) as fallback.
 - UX: lock success message now displays the actual encryption profile used (default or fallback).
 - Fix: restriction `copy_accessibility` now maps to QPDF `--accessibility=n` so "Khóa Copy Text cho Accessibility" is applied correctly.
+- UX: standardized bilingual naming for all PDF Lock/Unlock restrictions and actions (Vietnamese + English labels are now consistent).
+- UX: when opening a PDF, lock/unlock checkboxes now reflect the current permission state of that file; non-encrypted PDFs default to all unchecked.
 
 ## 1.0.2 - 2026-04-10
 

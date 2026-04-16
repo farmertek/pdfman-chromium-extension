@@ -3802,6 +3802,16 @@
       this.sourceWasEncrypted = false;
       this.initialRestrictions = {};
       this.selectAllState = false;
+      this.restrictionLabels = Object.freeze({
+        print: 'Khóa in tài liệu (Print)',
+        copy: 'Khóa sao chép văn bản/đồ họa (Copy text/graphics)',
+        modify: 'Khóa chỉnh sửa nội dung (Modify contents)',
+        annotate: 'Khóa chú thích/annotation (Modify annotations)',
+        fill: 'Khóa điền biểu mẫu (Fill forms)',
+        extract: 'Khóa trích xuất nội dung (Extract text/images)',
+        copy_accessibility: 'Khóa sao chép cho trợ năng (Copy for accessibility)',
+        comment: 'Khóa bình luận/markup (Commenting/markup)',
+      });
       this.dom = {};
       this._onPageHide = () => this.dispose();
       window.addEventListener('pagehide', this._onPageHide, true);
@@ -3842,6 +3852,7 @@
 
       // Drag and drop support for Lock tab
       this.setupDragDrop();
+      this.dom.btnToggle.textContent = '☑ Chọn tất cả / Select all';
       this.setEncryptionInfoState(false, 'chưa chọn file');
     }
 
@@ -3912,6 +3923,7 @@
         this.dom.fileInfo.style.color = '#000';
         this.dom.password.value = '';
         this.dom.passwordConfirm.value = '';
+        this.applyRestrictionsState({});
 
         // Try to read restrictions
         await this.readRestrictions(bytes);
@@ -3923,10 +3935,37 @@
 
     setEncryptionInfoState(isEncrypted, detailText) {
       const baseText = isEncrypted
-        ? 'File được mã hóa theo chuẩn PDF Standard Security'
-        : 'File chưa được mã hóa theo chuẩn PDF Standard Security';
+        ? 'Trạng thái mã hóa: file đang được bảo vệ (PDF Standard Security)'
+        : 'Trạng thái mã hóa: file chưa khóa (PDF Standard Security)';
       this.dom.encryptionInfo.textContent = detailText ? `${baseText} (${detailText})` : baseText;
       this.dom.encryptionInfo.style.color = isEncrypted ? '#2d8f00' : '#de5602';
+    }
+
+    applyRestrictionsState(restrictionState) {
+      Object.entries(this.checkboxes).forEach(([key, cb]) => {
+        cb.checked = !!(restrictionState && restrictionState[key]);
+        this.updateRestrictionStyle(key);
+      });
+      this.syncSelectAllButtonState();
+    }
+
+    syncSelectAllButtonState() {
+      const boxes = Object.values(this.checkboxes);
+      const allChecked = boxes.length > 0 && boxes.every(cb => cb.checked);
+      this.selectAllState = allChecked;
+      this.dom.btnToggle.textContent = allChecked
+        ? '☐ Bỏ chọn tất cả / Deselect all'
+        : '☑ Chọn tất cả / Select all';
+    }
+
+    getRestrictionLabel(key) {
+      return this.restrictionLabels[key] || key;
+    }
+
+    getSelectedRestrictionLabels(restrictions) {
+      return Object.entries(restrictions || {})
+        .filter(([, locked]) => !!locked)
+        .map(([key]) => this.getRestrictionLabel(key));
     }
 
     async promptForOpenPassword(fileName, bytes) {
@@ -3957,6 +3996,7 @@
       let pdfDoc = null;
       this.sourceOpenPassword = '';
       this.sourceWasEncrypted = false;
+      this.applyRestrictionsState({});
 
       try {
         let detectedEncrypted = false;
@@ -3978,10 +4018,9 @@
             const opened = await this.promptForOpenPassword(this.fileName, bytes);
             if (!opened) {
               this.sourceWasEncrypted = true;
-              this.setEncryptionInfoState(true, 'cần password để đọc quyền');
-              Object.values(this.checkboxes).forEach(cb => { cb.checked = true; });
+              this.setEncryptionInfoState(true, 'cần password để đọc quyền hiện tại');
+              this.applyRestrictionsState({});
               this.initialRestrictions = this.getCurrentRestrictions();
-              Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
               return;
             }
 
@@ -4002,7 +4041,10 @@
 
         this.sourceWasEncrypted = detectedEncrypted;
         if (detectedEncrypted) {
-          this.setEncryptionInfoState(true, 'owner/user password');
+          this.setEncryptionInfoState(
+            true,
+            this.sourceOpenPassword ? 'đã mở bằng owner/user password' : 'owner/user password'
+          );
 
           const mapping = {
             print: false,
@@ -4032,26 +4074,23 @@
             mapping.comment = !hasPerm('MODIFY_ANNOTATIONS');
           }
 
-          Object.entries(mapping).forEach(([key, locked]) => {
-            if (this.checkboxes[key]) this.checkboxes[key].checked = !!locked;
-          });
+          this.applyRestrictionsState(mapping);
         } else {
-          this.setEncryptionInfoState(false, 'không có password');
-          Object.values(this.checkboxes).forEach(cb => { cb.checked = false; });
+          this.setEncryptionInfoState(false, 'không đặt password mở file');
+          this.applyRestrictionsState({});
         }
 
         this.initialRestrictions = this.getCurrentRestrictions();
-        Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
       } catch (err) {
         console.warn('[Lock PDF] Không thể đọc thông tin mã hóa:', err);
         if (this.sourceWasEncrypted) {
-          this.setEncryptionInfoState(true, 'đã phát hiện encrypted nhưng không đọc đủ metadata');
-          Object.values(this.checkboxes).forEach(cb => { cb.checked = true; });
-          this.initialRestrictions = this.getCurrentRestrictions();
-          Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
+          this.setEncryptionInfoState(true, 'đã phát hiện mã hóa nhưng chưa đọc đủ metadata quyền');
+          this.applyRestrictionsState({});
         } else {
-          this.setEncryptionInfoState(false, 'không đọc được metadata quyền');
+          this.setEncryptionInfoState(false, 'không đọc được metadata quyền, đang hiển thị mặc định không khóa');
+          this.applyRestrictionsState({});
         }
+        this.initialRestrictions = this.getCurrentRestrictions();
       } finally {
         if (pdfDoc) {
           try { await pdfDoc.destroy(); } catch { /* ignore */ }
@@ -4077,17 +4116,16 @@
     }
 
     resetRestrictions() {
-      Object.entries(this.initialRestrictions).forEach(([key, val]) => {
-        if (this.checkboxes[key]) this.checkboxes[key].checked = val;
-      });
-      Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
+      this.applyRestrictionsState(this.initialRestrictions);
     }
 
     toggleSelectAll() {
       this.selectAllState = !this.selectAllState;
       Object.values(this.checkboxes).forEach(cb => { cb.checked = this.selectAllState; });
       Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
-      this.dom.btnToggle.textContent = this.selectAllState ? '☐ Deselect All' : '☑ Select All';
+      this.dom.btnToggle.textContent = this.selectAllState
+        ? '☐ Bỏ chọn tất cả / Deselect all'
+        : '☑ Chọn tất cả / Select all';
     }
 
     async lockPdf() {
@@ -4295,6 +4333,13 @@
         // Generate output filename
         const name = this.fileName.replace(/\.pdf$/i, '');
         const outputName = `${name}_locked-by-pdfman.pdf`;
+        const selectedRestrictionLabels = this.getSelectedRestrictionLabels(restrictions);
+        const restrictionsSummary = selectedRestrictionLabels.length
+          ? selectedRestrictionLabels.map(label => `- ${label}`).join('\n')
+          : '- Không có / None';
+        const encryptionProfileLabel = appliedEncryptionKeyBits === DEFAULT_ENCRYPTION_KEY_BITS
+          ? 'AES-256 (primary profile)'
+          : 'AES-128 (fallback profile)';
 
         const compatibilityNotes = [];
         if (appliedEncryptionKeyBits !== DEFAULT_ENCRYPTION_KEY_BITS) {
@@ -4304,7 +4349,7 @@
           compatibilityNotes.push('• annotate/fill/comment được áp dụng theo nhóm modify.');
         }
         if (restrictions.copy_accessibility) {
-          compatibilityNotes.push('• copy_accessibility được áp dụng trực tiếp bằng quyền accessibility.');
+          compatibilityNotes.push('• Restriction "Copy for accessibility" được áp dụng bằng quyền accessibility (--accessibility=n).');
         }
         const compatibilityText = compatibilityNotes.length
           ? `\n\nLưu ý tương thích:\n${compatibilityNotes.join('\n')}`
@@ -4314,9 +4359,11 @@
         await showAlert('Thành công',
           `PDF đã được khóa thành công!\n\n` +
           `File: ${outputName}\n` +
-          `Encryption: AES-${appliedEncryptionKeyBits}${appliedEncryptionKeyBits === DEFAULT_ENCRYPTION_KEY_BITS ? ' (mặc định)' : ' (fallback)'}\n` +
-          (password ? 'Password đã được thiết lập.\n' : 'Không yêu cầu password để mở (chỉ khóa restrictions).\n') +
-          `Restrictions: ${Object.entries(restrictions).filter(([, v]) => v).map(([k]) => k).join(', ') || 'Không có'}` +
+          `Profile mã hóa đã áp dụng / Applied encryption profile: ${encryptionProfileLabel}\n` +
+          (password
+            ? 'Password mở file: Đã thiết lập.\n'
+            : 'Password mở file: Không đặt (chỉ khóa restrictions).\n') +
+          `Danh sách restrictions đã khóa / Locked restrictions:\n${restrictionsSummary}` +
           compatibilityText
         );
         this.clearForm();
@@ -4373,7 +4420,7 @@
       this.dom.passwordConfirm.value = '';
       Object.values(this.checkboxes).forEach(cb => { cb.checked = false; });
       Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
-      this.dom.btnToggle.textContent = '☑ Select All';
+      this.dom.btnToggle.textContent = '☑ Chọn tất cả / Select all';
       this.setEncryptionInfoState(false, 'chưa chọn file');
       this.setUiState(false);
     }
