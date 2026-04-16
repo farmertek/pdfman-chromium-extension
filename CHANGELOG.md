@@ -7,6 +7,7 @@ All notable changes to PDF Manager extension are documented in this file.
 - Security: PDF Lock now defaults to AES-256 encryption profile.
 - Compatibility: when legacy QPDF environments reject 256-bit profile, lock flow retries with AES-128 (`--use-aes=y`) as fallback.
 - UX: lock success message now displays the actual encryption profile used (default or fallback).
+- Fix: restriction `copy_accessibility` now maps to QPDF `--accessibility=n` so "Khóa Copy Text cho Accessibility" is applied correctly.
 
 ## 1.0.2 - 2026-04-10
 

@@ -4132,14 +4132,15 @@
         args.push('--encrypt', userPassword, ownerPassword, String(DEFAULT_ENCRYPTION_KEY_BITS));
 
         // Legacy qpdf build in qpdf.js works reliably with print/modify/extract flags.
-        // Granular flags like --annotate/--form/--accessibility may fail with status 2.
         const blockPrint = !!restrictions.print;
         const blockModify = !!(restrictions.modify || restrictions.annotate || restrictions.fill || restrictions.comment);
-        const blockExtract = !!(restrictions.copy || restrictions.extract || restrictions.copy_accessibility);
+        const blockExtract = !!(restrictions.copy || restrictions.extract);
+        const blockAccessibility = !!restrictions.copy_accessibility;
 
         if (blockPrint) args.push('--print=none');
         if (blockModify) args.push('--modify=none');
         if (blockExtract) args.push('--extract=n');
+        if (blockAccessibility) args.push('--accessibility=n');
 
         args.push('--', 'input.pdf', 'output.pdf');
 
@@ -4228,6 +4229,7 @@
                     if (blockPrint) fallbackArgs.push('--print=none');
                     if (blockModify) fallbackArgs.push('--modify=none');
                     if (blockExtract) fallbackArgs.push('--extract=n');
+                    if (blockAccessibility) fallbackArgs.push('--accessibility=n');
                     fallbackArgs.push('--', 'input.pdf', 'output.pdf');
 
                     console.warn('[Lock PDF] Primary encrypt args failed; retrying legacy profile...');
@@ -4302,7 +4304,7 @@
           compatibilityNotes.push('• annotate/fill/comment được áp dụng theo nhóm modify.');
         }
         if (restrictions.copy_accessibility) {
-          compatibilityNotes.push('• copy_accessibility được áp dụng theo nhóm extract/copy.');
+          compatibilityNotes.push('• copy_accessibility được áp dụng trực tiếp bằng quyền accessibility.');
         }
         const compatibilityText = compatibilityNotes.length
           ? `\n\nLưu ý tương thích:\n${compatibilityNotes.join('\n')}`
