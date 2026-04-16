@@ -1,6 +1,6 @@
 {
   "name": "pdfman-extension",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "PDF Manager - Chrome Extension for managing, rotating, reordering, merging, and locking/unlocking PDF files",
   "private": true,
   "scripts": {

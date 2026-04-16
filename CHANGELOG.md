@@ -2,6 +2,12 @@
 
 All notable changes to PDF Manager extension are documented in this file.
 
+## 1.0.3 - 2026-04-16
+
+- Security: PDF Lock now defaults to AES-256 encryption profile.
+- Compatibility: when legacy QPDF environments reject 256-bit profile, lock flow retries with AES-128 (`--use-aes=y`) as fallback.
+- UX: lock success message now displays the actual encryption profile used (default or fallback).
+
 ## 1.0.2 - 2026-04-10
 
 - Fix: improve auto-open flow when launching from a browser tab that is viewing a PDF on a LAN/UNC path.

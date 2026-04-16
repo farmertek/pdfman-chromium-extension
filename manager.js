@@ -3798,6 +3798,8 @@
       this.pdfBytes = null;
       this._pdfOpfsFile = null;
       this.fileName = '';
+      this.sourceOpenPassword = '';
+      this.sourceWasEncrypted = false;
       this.initialRestrictions = {};
       this.selectAllState = false;
       this.dom = {};
@@ -3840,6 +3842,7 @@
 
       // Drag and drop support for Lock tab
       this.setupDragDrop();
+      this.setEncryptionInfoState(false, 'chưa chọn file');
     }
 
     setupDragDrop() {
@@ -3903,8 +3906,12 @@
         const bytes = new Uint8Array(await file.arrayBuffer());
         await this.setLockSourceBytes(bytes);
         this.fileName = file.name;
+        this.sourceOpenPassword = '';
+        this.sourceWasEncrypted = false;
         this.dom.fileInfo.textContent = file.name;
         this.dom.fileInfo.style.color = '#000';
+        this.dom.password.value = '';
+        this.dom.passwordConfirm.value = '';
 
         // Try to read restrictions
         await this.readRestrictions(bytes);
@@ -3914,53 +3921,141 @@
       }
     }
 
+    setEncryptionInfoState(isEncrypted, detailText) {
+      const baseText = isEncrypted
+        ? 'File được mã hóa theo chuẩn PDF Standard Security'
+        : 'File chưa được mã hóa theo chuẩn PDF Standard Security';
+      this.dom.encryptionInfo.textContent = detailText ? `${baseText} (${detailText})` : baseText;
+      this.dom.encryptionInfo.style.color = isEncrypted ? '#2d8f00' : '#de5602';
+    }
+
+    async promptForOpenPassword(fileName, bytes) {
+      while (true) {
+        const result = await showPasswordPrompt(
+          'File bị khóa',
+          `File '${fileName || 'PDF'}' bị khóa bằng password.\nNhập password để mở:`
+        );
+
+        if (!result || result.action === 'cancel') return null;
+
+        const openPassword = result.input || '';
+        try {
+          const task = pdfjsLib.getDocument({ data: bytes.slice(), password: openPassword });
+          const pdfDoc = await task.promise;
+          return { pdfDoc, openPassword };
+        } catch (err) {
+          if (err && err.name === 'PasswordException') {
+            await showAlert('Lỗi', 'Password không đúng. Vui lòng nhập lại hoặc nhấn Hủy.');
+            continue;
+          }
+          throw err;
+        }
+      }
+    }
+
     async readRestrictions(bytes) {
+      let pdfDoc = null;
+      this.sourceOpenPassword = '';
+      this.sourceWasEncrypted = false;
+
       try {
-        // Use pdf.js to check encryption
-        let pdfDoc;
+        let detectedEncrypted = false;
+
+        // Use pdf-lib to check encryption metadata first.
+        try {
+          const testDoc = await PDFLib.PDFDocument.load(bytes, { ignoreEncryption: true });
+          detectedEncrypted = !!testDoc.isEncrypted;
+        } catch {
+          detectedEncrypted = false;
+        }
+
         try {
           const task = pdfjsLib.getDocument({ data: bytes.slice() });
           pdfDoc = await task.promise;
         } catch (e) {
           if (e && e.name === 'PasswordException') {
-            this.dom.encryptionInfo.textContent = 'File được mã hóa (cần password)';
-            // Set all restrictions as locked
-            Object.values(this.checkboxes).forEach(cb => { cb.checked = true; });
-            this.initialRestrictions = this.getCurrentRestrictions();
-            return;
+            detectedEncrypted = true;
+            const opened = await this.promptForOpenPassword(this.fileName, bytes);
+            if (!opened) {
+              this.sourceWasEncrypted = true;
+              this.setEncryptionInfoState(true, 'cần password để đọc quyền');
+              Object.values(this.checkboxes).forEach(cb => { cb.checked = true; });
+              this.initialRestrictions = this.getCurrentRestrictions();
+              Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
+              return;
+            }
+
+            pdfDoc = opened.pdfDoc;
+            this.sourceOpenPassword = opened.openPassword;
+            this.dom.password.value = opened.openPassword;
+            this.dom.passwordConfirm.value = opened.openPassword;
+          } else {
+            throw e;
           }
-          throw e;
         }
 
         // Check permissions
-        const perms = pdfDoc.getPermissions();
-        if (perms) {
-          this.dom.encryptionInfo.textContent = 'File được mã hóa';
-          // Map pdf.js permissions to our checkboxes
+        const perms = await pdfDoc.getPermissions();
+        if (!detectedEncrypted && Array.isArray(perms)) {
+          detectedEncrypted = true;
+        }
+
+        this.sourceWasEncrypted = detectedEncrypted;
+        if (detectedEncrypted) {
+          this.setEncryptionInfoState(true, 'owner/user password');
+
           const mapping = {
-            print: perms.includes && !perms.includes('print') ? true : !perms[0],
-            copy: perms.includes && !perms.includes('copy') ? true : !perms[3],
-            modify: perms.includes && !perms.includes('modify') ? true : !perms[1],
-            annotate: perms.includes && !perms.includes('annotate') ? true : !perms[4],
-            fill: perms.includes && !perms.includes('fill_interactive_forms') ? true : false,
-            extract: perms.includes && !perms.includes('extract') ? true : false,
+            print: false,
+            copy: false,
+            modify: false,
+            annotate: false,
+            fill: false,
+            extract: false,
             copy_accessibility: false,
             comment: false,
           };
+
+          if (Array.isArray(perms)) {
+            const permissionFlags = (pdfjsLib && pdfjsLib.PermissionFlag) ? pdfjsLib.PermissionFlag : {};
+            const hasPerm = (flagName) => {
+              const flag = permissionFlags[flagName];
+              return Number.isInteger(flag) ? perms.includes(flag) : true;
+            };
+
+            mapping.print = !(hasPerm('PRINT') || hasPerm('PRINT_HIGH_QUALITY'));
+            mapping.copy = !hasPerm('COPY');
+            mapping.modify = !hasPerm('MODIFY_CONTENTS');
+            mapping.annotate = !hasPerm('MODIFY_ANNOTATIONS');
+            mapping.fill = !hasPerm('FILL_INTERACTIVE_FORMS');
+            mapping.extract = !hasPerm('COPY');
+            mapping.copy_accessibility = !hasPerm('COPY_FOR_ACCESSIBILITY');
+            mapping.comment = !hasPerm('MODIFY_ANNOTATIONS');
+          }
+
           Object.entries(mapping).forEach(([key, locked]) => {
-            if (this.checkboxes[key]) this.checkboxes[key].checked = locked;
+            if (this.checkboxes[key]) this.checkboxes[key].checked = !!locked;
           });
         } else {
-          this.dom.encryptionInfo.textContent = 'File không được mã hóa';
+          this.setEncryptionInfoState(false, 'không có password');
           Object.values(this.checkboxes).forEach(cb => { cb.checked = false; });
         }
 
         this.initialRestrictions = this.getCurrentRestrictions();
-        await pdfDoc.destroy();
-
         Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
       } catch (err) {
-        this.dom.encryptionInfo.textContent = 'Không thể đọc thông tin mã hóa';
+        console.warn('[Lock PDF] Không thể đọc thông tin mã hóa:', err);
+        if (this.sourceWasEncrypted) {
+          this.setEncryptionInfoState(true, 'đã phát hiện encrypted nhưng không đọc đủ metadata');
+          Object.values(this.checkboxes).forEach(cb => { cb.checked = true; });
+          this.initialRestrictions = this.getCurrentRestrictions();
+          Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
+        } else {
+          this.setEncryptionInfoState(false, 'không đọc được metadata quyền');
+        }
+      } finally {
+        if (pdfDoc) {
+          try { await pdfDoc.destroy(); } catch { /* ignore */ }
+        }
       }
     }
 
@@ -4024,11 +4119,17 @@
 
       try {
         // Build QPDF encryption command arguments
+        const DEFAULT_ENCRYPTION_KEY_BITS = 256;
+        const LEGACY_FALLBACK_KEY_BITS = 128;
+        const ALLOW_LEGACY_AES128_FALLBACK = true;
+        let appliedEncryptionKeyBits = DEFAULT_ENCRYPTION_KEY_BITS;
+
+        const sourceOpenPassword = this.sourceOpenPassword || '';
         const userPassword = password || '';
         const ownerPassword = password ? password + '_owner' : 'owner_' + Date.now();
-        const args = [
-          '--encrypt', userPassword, ownerPassword, '256',
-        ];
+        const args = [];
+        if (sourceOpenPassword) args.push(`--password=${sourceOpenPassword}`);
+        args.push('--encrypt', userPassword, ownerPassword, String(DEFAULT_ENCRYPTION_KEY_BITS));
 
         // Legacy qpdf build in qpdf.js works reliably with print/modify/extract flags.
         // Granular flags like --annotate/--form/--accessibility may fail with status 2.
@@ -4117,10 +4218,13 @@
                     );
                   } catch (execErr) {
                     const msg = execErr && execErr.message ? execErr.message : String(execErr);
-                    const shouldFallback = /invalid for 128-bit keys|invalid for 256-bit keys|QPDF exited with status 2/i.test(msg);
+                    const shouldFallback = ALLOW_LEGACY_AES128_FALLBACK
+                      && /invalid for 128-bit keys|invalid for 256-bit keys|QPDF exited with status 2/i.test(msg);
                     if (!shouldFallback) throw execErr;
 
-                    const fallbackArgs = ['--encrypt', userPassword, ownerPassword, '128', '--use-aes=y'];
+                    const fallbackArgs = [];
+                    if (sourceOpenPassword) fallbackArgs.push(`--password=${sourceOpenPassword}`);
+                    fallbackArgs.push('--encrypt', userPassword, ownerPassword, String(LEGACY_FALLBACK_KEY_BITS), '--use-aes=y');
                     if (blockPrint) fallbackArgs.push('--print=none');
                     if (blockModify) fallbackArgs.push('--modify=none');
                     if (blockExtract) fallbackArgs.push('--extract=n');
@@ -4128,6 +4232,7 @@
 
                     console.warn('[Lock PDF] Primary encrypt args failed; retrying legacy profile...');
                     console.warn('[Lock PDF] Fallback args:', fallbackArgs.join(' '));
+                    appliedEncryptionKeyBits = LEGACY_FALLBACK_KEY_BITS;
                     await promisify(
                       (cb) => qpdf.execute(fallbackArgs, cb),
                       'Execute encrypt (fallback)'
@@ -4190,6 +4295,9 @@
         const outputName = `${name}_locked-by-pdfman.pdf`;
 
         const compatibilityNotes = [];
+        if (appliedEncryptionKeyBits !== DEFAULT_ENCRYPTION_KEY_BITS) {
+          compatibilityNotes.push('• Môi trường đã dùng fallback AES-128 để tương thích.');
+        }
         if (restrictions.annotate || restrictions.fill || restrictions.comment) {
           compatibilityNotes.push('• annotate/fill/comment được áp dụng theo nhóm modify.');
         }
@@ -4204,6 +4312,7 @@
         await showAlert('Thành công',
           `PDF đã được khóa thành công!\n\n` +
           `File: ${outputName}\n` +
+          `Encryption: AES-${appliedEncryptionKeyBits}${appliedEncryptionKeyBits === DEFAULT_ENCRYPTION_KEY_BITS ? ' (mặc định)' : ' (fallback)'}\n` +
           (password ? 'Password đã được thiết lập.\n' : 'Không yêu cầu password để mở (chỉ khóa restrictions).\n') +
           `Restrictions: ${Object.entries(restrictions).filter(([, v]) => v).map(([k]) => k).join(', ') || 'Không có'}` +
           compatibilityText
@@ -4252,6 +4361,8 @@
         deleteOpfsFile(staleFile).catch(() => { /* ignore */ });
       }
       this.fileName = '';
+      this.sourceOpenPassword = '';
+      this.sourceWasEncrypted = false;
       this.initialRestrictions = {};
       this.selectAllState = false;
       this.dom.fileInfo.textContent = 'Chưa chọn file';
@@ -4261,7 +4372,7 @@
       Object.values(this.checkboxes).forEach(cb => { cb.checked = false; });
       Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
       this.dom.btnToggle.textContent = '☑ Select All';
-      this.dom.encryptionInfo.textContent = 'File không được mã hóa';
+      this.setEncryptionInfoState(false, 'chưa chọn file');
       this.setUiState(false);
     }
 
