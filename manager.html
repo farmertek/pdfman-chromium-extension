@@ -131,18 +131,25 @@
         <div class="restrictions-controls">
           <button id="lock-btn-reset" class="btn lock-ctrl-btn" disabled title="Khôi phục quyền ban đầu của PDF">🔄
             Reset quyền / Reset</button>
-          <button id="lock-btn-toggle" class="btn lock-ctrl-btn" disabled title="Chọn hoặc bỏ chọn tất cả restrictions">☑ Chọn tất cả / Select all</button>
+          <button id="lock-btn-toggle" class="btn lock-ctrl-btn" disabled
+            title="Chọn hoặc bỏ chọn tất cả restrictions">☑ Chọn tất cả / Select all</button>
           <span id="lock-encryption-info" class="encryption-info">Trạng thái mã hóa: chưa chọn file</span>
         </div>
         <div class="restrictions-list" id="restrictions-list">
-          <label class="restriction-item"><input type="checkbox" data-key="print" checked disabled> 🚫 Khóa in tài liệu (Print)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="copy" checked disabled> 🚫 Khóa sao chép văn bản/đồ họa (Copy text/graphics)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="modify" checked disabled> 🚫 Khóa chỉnh sửa nội dung (Modify contents)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="annotate" checked disabled> 🚫 Khóa chú thích/annotation (Modify annotations)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="fill" checked disabled> 🚫 Khóa điền biểu mẫu (Fill forms)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="extract" checked disabled> 🚫 Khóa trích xuất nội dung (Extract text/images)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="copy_accessibility" checked disabled> 🚫 Khóa sao chép cho trợ năng (Copy for accessibility)</label>
-          <label class="restriction-item"><input type="checkbox" data-key="comment" checked disabled> 🚫 Khóa bình luận/markup (Commenting/markup)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="print" checked disabled> 🚫 Khóa in tài liệu
+            (Print)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="copy" checked disabled> 🚫 Khóa sao chép văn
+            bản/đồ họa (Copy text/graphics)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="modify" checked disabled> 🚫 Khóa chỉnh sửa
+            nội dung (Modify contents)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="annotate" checked disabled> 🚫 Khóa chú
+            thích/annotation (Modify annotations)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="fill" checked disabled> 🚫 Khóa điền biểu mẫu
+            (Fill forms)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="extract" checked disabled> 🚫 Khóa trích xuất
+            nội dung (Extract text/images)</label>
+          <label class="restriction-item"><input type="checkbox" data-key="comment" checked disabled> 🚫 Khóa bình
+            luận/markup (Commenting/markup)</label>
         </div>
       </fieldset>
 
@@ -164,8 +171,10 @@
       <div class="lock-section lock-actions">
         <button id="lock-btn-lock" class="btn btn-lock" disabled
           title="Khóa PDF với restrictions và password đã chọn">🔒 Lock PDF / Khóa PDF</button>
-        <button id="lock-btn-unlock" class="btn btn-unlock" disabled title="Mở khóa PDF">🔓 Unlock PDF / Mở khóa PDF</button>
-        <span class="hint">Profile mặc định: AES-256. Nếu môi trường không hỗ trợ, hệ thống tự fallback sang AES-128.</span>
+        <button id="lock-btn-unlock" class="btn btn-unlock" disabled title="Mở khóa PDF">🔓 Unlock PDF / Mở khóa
+          PDF</button>
+        <span class="hint">Profile mặc định: AES-256. Nếu môi trường không hỗ trợ, hệ thống tự fallback sang
+          AES-128.</span>
       </div>
     </div>
 

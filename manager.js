@@ -3809,7 +3809,6 @@
         annotate: 'Khóa chú thích/annotation (Modify annotations)',
         fill: 'Khóa điền biểu mẫu (Fill forms)',
         extract: 'Khóa trích xuất nội dung (Extract text/images)',
-        copy_accessibility: 'Khóa sao chép cho trợ năng (Copy for accessibility)',
         comment: 'Khóa bình luận/markup (Commenting/markup)',
       });
       this.dom = {};
@@ -4053,7 +4052,6 @@
             annotate: false,
             fill: false,
             extract: false,
-            copy_accessibility: false,
             comment: false,
           };
 
@@ -4070,7 +4068,6 @@
             mapping.annotate = !hasPerm('MODIFY_ANNOTATIONS');
             mapping.fill = !hasPerm('FILL_INTERACTIVE_FORMS');
             mapping.extract = !hasPerm('COPY');
-            mapping.copy_accessibility = !hasPerm('COPY_FOR_ACCESSIBILITY');
             mapping.comment = !hasPerm('MODIFY_ANNOTATIONS');
           }
 
@@ -4165,22 +4162,27 @@
         const sourceOpenPassword = this.sourceOpenPassword || '';
         const userPassword = password || '';
         const ownerPassword = password ? password + '_owner' : 'owner_' + Date.now();
-        const args = [];
-        if (sourceOpenPassword) args.push(`--password=${sourceOpenPassword}`);
-        args.push('--encrypt', userPassword, ownerPassword, String(DEFAULT_ENCRYPTION_KEY_BITS));
 
         // Legacy qpdf build in qpdf.js works reliably with print/modify/extract flags.
         const blockPrint = !!restrictions.print;
         const blockModify = !!(restrictions.modify || restrictions.annotate || restrictions.fill || restrictions.comment);
         const blockExtract = !!(restrictions.copy || restrictions.extract);
-        const blockAccessibility = !!restrictions.copy_accessibility;
 
-        if (blockPrint) args.push('--print=none');
-        if (blockModify) args.push('--modify=none');
-        if (blockExtract) args.push('--extract=n');
-        if (blockAccessibility) args.push('--accessibility=n');
+        const buildEncryptArgs = (keyBits) => {
+          const buildArgs = [];
+          if (sourceOpenPassword) buildArgs.push(`--password=${sourceOpenPassword}`);
+          buildArgs.push('--encrypt', userPassword, ownerPassword, String(keyBits));
+          if (keyBits === LEGACY_FALLBACK_KEY_BITS) {
+            buildArgs.push('--use-aes=y');
+          }
+          if (blockPrint) buildArgs.push('--print=none');
+          if (blockModify) buildArgs.push('--modify=none');
+          if (blockExtract) buildArgs.push('--extract=n');
+          buildArgs.push('--', 'input.pdf', 'output.pdf');
+          return buildArgs;
+        };
 
-        args.push('--', 'input.pdf', 'output.pdf');
+        let args = buildEncryptArgs(appliedEncryptionKeyBits);
 
         // Prepare input data
         const inputBuffer = sourceBytes.buffer.slice(
@@ -4240,6 +4242,24 @@
                 console.log('[Lock PDF] QPDF worker ready, starting operations...');
 
                 try {
+                  const validateOutputBytes = (rawData, stepName) => {
+                    if (!rawData || rawData.length === 0) {
+                      throw new Error(`${stepName}: QPDF trả về file output rỗng (0 bytes)`);
+                    }
+
+                    const out = new Uint8Array(rawData);
+                    if (out.length < 20) {
+                      throw new Error(`${stepName}: File output quá nhỏ (${out.length} bytes), có thể bị lỗi`);
+                    }
+
+                    const header = String.fromCharCode(out[0], out[1], out[2], out[3], out[4]);
+                    if (!header.startsWith('%PDF')) {
+                      throw new Error(`${stepName}: Output không phải file PDF hợp lệ (header: "${header}")`);
+                    }
+
+                    return out;
+                  };
+
                   // Step 1: Save input file to QPDF virtual FS
                   console.log('[Lock PDF] Step 1/3: Saving input.pdf to worker...');
                   await promisify(
@@ -4258,17 +4278,11 @@
                   } catch (execErr) {
                     const msg = execErr && execErr.message ? execErr.message : String(execErr);
                     const shouldFallback = ALLOW_LEGACY_AES128_FALLBACK
+                      && appliedEncryptionKeyBits !== LEGACY_FALLBACK_KEY_BITS
                       && /invalid for 128-bit keys|invalid for 256-bit keys|QPDF exited with status 2/i.test(msg);
                     if (!shouldFallback) throw execErr;
 
-                    const fallbackArgs = [];
-                    if (sourceOpenPassword) fallbackArgs.push(`--password=${sourceOpenPassword}`);
-                    fallbackArgs.push('--encrypt', userPassword, ownerPassword, String(LEGACY_FALLBACK_KEY_BITS), '--use-aes=y');
-                    if (blockPrint) fallbackArgs.push('--print=none');
-                    if (blockModify) fallbackArgs.push('--modify=none');
-                    if (blockExtract) fallbackArgs.push('--extract=n');
-                    if (blockAccessibility) fallbackArgs.push('--accessibility=n');
-                    fallbackArgs.push('--', 'input.pdf', 'output.pdf');
+                    const fallbackArgs = buildEncryptArgs(LEGACY_FALLBACK_KEY_BITS);
 
                     console.warn('[Lock PDF] Primary encrypt args failed; retrying legacy profile...');
                     console.warn('[Lock PDF] Fallback args:', fallbackArgs.join(' '));
@@ -4288,22 +4302,7 @@
                   );
                   console.log('[Lock PDF] Step 3/3: Done, output size:', outputData ? outputData.length : 0, 'bytes');
 
-                  // Validate output
-                  if (!outputData || outputData.length === 0) {
-                    throw new Error('QPDF trả về file output rỗng (0 bytes)');
-                  }
-
-                  const result = new Uint8Array(outputData);
-                  if (result.length < 20) {
-                    throw new Error('File output quá nhỏ (' + result.length + ' bytes), có thể bị lỗi');
-                  }
-
-                  // Check %PDF header
-                  const header = String.fromCharCode(result[0], result[1], result[2], result[3], result[4]);
-                  if (!header.startsWith('%PDF')) {
-                    throw new Error('Output không phải file PDF hợp lệ (header: "' + header + '")');
-                  }
-
+                  const result = validateOutputBytes(outputData, 'Primary profile');
                   console.log('[Lock PDF] Output validation passed (%PDF header OK)');
                   finish(null, result);
                 } catch (e) {
@@ -4347,9 +4346,6 @@
         }
         if (restrictions.annotate || restrictions.fill || restrictions.comment) {
           compatibilityNotes.push('• annotate/fill/comment được áp dụng theo nhóm modify.');
-        }
-        if (restrictions.copy_accessibility) {
-          compatibilityNotes.push('• Restriction "Copy for accessibility" được áp dụng bằng quyền accessibility (--accessibility=n).');
         }
         const compatibilityText = compatibilityNotes.length
           ? `\n\nLưu ý tương thích:\n${compatibilityNotes.join('\n')}`
