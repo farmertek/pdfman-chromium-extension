@@ -47,6 +47,10 @@
   const CARD_WIDTH_PADDING_PX = 28;
   const MIN_THUMB_PREVIEW_WIDTH = 64;
   const MIN_THUMB_PREVIEW_HEIGHT = 40;
+  const UI_LANG_STORAGE_KEY = 'pdfman.uiLanguage';
+  const UI_THEME_STORAGE_KEY = 'pdfman.uiTheme';
+  const SUPPORTED_LANGUAGES = Object.freeze(['vi', 'en']);
+  const SUPPORTED_THEME_MODES = Object.freeze(['system', 'light', 'dark']);
   const PERF_PROFILES = Object.freeze({
     normal: {
       viewCanvasPixels: 2000000,
@@ -71,6 +75,815 @@
       exportJpegQuality: 0.65,
     },
   });
+
+  const I18N_TEXT = Object.freeze({
+    vi: {
+      app: {
+        title: 'PDF Manager - Copyright © 2026 by Hailúa',
+      },
+      tabs: {
+        manager: 'PDF Manager',
+        lock: '🔒 PDF Lock/Unlock',
+      },
+      toolbar: {
+        languageToggleTitle: 'Chuyển ngôn ngữ EN/VI',
+        themeToggleTitle: 'Chọn giao diện Light/Dark/System',
+        themeSystem: 'Hệ thống',
+        themeLight: 'Sáng',
+        themeDark: 'Tối',
+      },
+      common: {
+        ok: 'OK',
+        yes: 'Có',
+        no: 'Không',
+        cancel: 'Hủy',
+      },
+      dialog: {
+        error: 'Lỗi',
+        warning: 'Cảnh báo',
+        info: 'Thông báo',
+        success: 'Thành công',
+        saveError: 'Lỗi khi lưu',
+        confirm: 'Xác nhận',
+        confirmDelete: 'Xác nhận xóa',
+        confirmResetAll: 'Xác nhận Reset All',
+        addPdfPosition: 'Chọn vị trí thêm PDF',
+        unsavedFile: 'File chưa lưu',
+        fileLocked: 'File bị khóa',
+        autoOpenLanFailed: 'Không thể tự mở PDF từ thư mục mạng LAN',
+        autoOpenLocalFailed: 'Không thể tự mở PDF local',
+        filePickerFailed: 'Không thể mở hộp thoại chọn file',
+        passwordPlaceholder: 'Nhập password...',
+      },
+      manager: {
+        openPdf: '📂 Open PDF',
+        openPdfTitle: 'Tìm file PDF để mở và quản lý (hoặc kéo thả PDF vào khung nội dung)',
+        closePdf: '✖ Close PDF',
+        closePdfTitle: 'Đóng PDF hiện tại',
+        saveAsPdf: '💾 SaveAs PDF',
+        saveAsPdfTitle: 'Lưu file PDF mới sau khi đã chỉnh sửa',
+        addPdf: '➕ Add PDF',
+        addPdfTitle: 'Nối file PDF khác vào trước hoặc sau danh sách trang',
+        selectAll: '☑ Select All',
+        deselectAll: '☐ Deselect All',
+        selectAllTitle: 'Chọn hoặc bỏ chọn tất cả các trang (Shift+Click: chọn khoảng)',
+        rotateCw: '↻ +90°',
+        rotateCwTitle: 'Xoay các trang đã chọn 90° theo chiều kim đồng hồ',
+        rotateCcw: '↺ -90°',
+        rotateCcwTitle: 'Xoay các trang đã chọn 90° ngược chiều kim đồng hồ',
+        rotate180: '⇅ 180°',
+        rotate180Title: 'Xoay các trang đã chọn 180°',
+        rotateReset: '↺ Reset 0°',
+        rotateResetTitle: 'Reset lại các trang đã chọn về 0° (trạng thái ban đầu)',
+        moveUp: '⬆ Move Up',
+        moveUpTitle: 'Di chuyển các trang đã chọn lên trên',
+        moveDown: '⬇ Move Down',
+        moveDownTitle: 'Di chuyển các trang đã chọn xuống dưới',
+        delete: '🗑 Delete',
+        deleteTitle: 'Xóa các trang đã chọn khỏi danh sách',
+        resetAll: '⎌ Reset All',
+        resetAllTitle: 'Hoàn tác tất cả thay đổi và tải lại file PDF ban đầu',
+        emptyTitle: 'Chưa mở file PDF nào',
+        emptyHintHtml: 'Nhấn <strong>"Open PDF"</strong> hoặc kéo thả file PDF vào đây',
+        lowMemoryMode: 'Chế độ máy yếu',
+        lowMemoryTitle: 'Giảm RAM/CPU cho máy yếu (render chậm hơn)',
+        perfWidgetTitle: 'Ước lượng tài nguyên đang dùng của PDF Manager',
+        ramLabel: 'RAM:',
+        cpuLabel: 'CPU:',
+        purgeMemory: 'Purge Memory',
+        purgingMemory: 'Purging...',
+        purgeMemoryTitle: 'Dọn cache render tạm thời để giảm RAM/CPU khi cần',
+        zoomLabel: 'Zoom (%):',
+        apply: 'Apply',
+        pageLabel: 'Trang {page}',
+        fileNotSelected: 'Chưa chọn file nào',
+        fileOpeningMany: 'Đang mở: {count} file PDF',
+        fileOpeningSingle: 'Đang mở: {fileName}',
+        pageCount: 'Tổng số trang: {total}',
+        pageCountWithVisible: 'Tổng số trang: {total} (sẽ còn {visible} trang)',
+        selectedCount: '| Đã chọn: {count}',
+        lazyStatus: '| Thumbnail mode: lazy-rendered | {engine} | {columns} columns | Zoom {zoom}% | Storage: {storage}',
+        tempPath: '| Temp path: {path}',
+        tempPathHintNone: 'Chưa có dữ liệu temp đang hoạt động.',
+        storageOpfs: 'OPFS temp',
+        storageMemory: 'RAM fallback',
+        storageUnknown: '--',
+        dropOverlay: 'Thả file PDF tại đây',
+        positionStart: 'đầu',
+        positionEnd: 'cuối',
+        unknownPath: '(không xác định)',
+      },
+      lock: {
+        title: 'Tool Lock/Unlock PDF with Restrictions (AES-256 + AES-128 fallback)',
+        openPdfTitle: 'Chọn file PDF để khóa/mở khóa',
+        fileNotSelected: 'Chưa chọn file',
+        restrictionsLegend: 'Restrictions / Quyền cần khóa',
+        resetRestrictions: '🔄 Reset quyền / Reset',
+        resetRestrictionsTitle: 'Khôi phục quyền ban đầu của PDF',
+        selectAllRestrictions: '☑ Chọn tất cả / Select all',
+        deselectAllRestrictions: '☐ Bỏ chọn tất cả / Deselect all',
+        toggleRestrictionsTitle: 'Chọn hoặc bỏ chọn tất cả restrictions',
+        encryptionInitial: 'Trạng thái mã hóa: chưa chọn file',
+        restriction: {
+          print: '🚫 Khóa in tài liệu (Print)',
+          copy: '🚫 Khóa sao chép văn bản/đồ họa (Copy text/graphics)',
+          modify: '🚫 Khóa chỉnh sửa nội dung (Modify contents)',
+          annotate: '🚫 Khóa chú thích/annotation (Modify annotations)',
+          fill: '🚫 Khóa điền biểu mẫu (Fill forms)',
+          extract: '🚫 Khóa trích xuất nội dung (Extract text/images)',
+          comment: '🚫 Khóa bình luận/markup (Commenting/markup)',
+        },
+        restrictionLabel: {
+          print: 'Khóa in tài liệu (Print)',
+          copy: 'Khóa sao chép văn bản/đồ họa (Copy text/graphics)',
+          modify: 'Khóa chỉnh sửa nội dung (Modify contents)',
+          annotate: 'Khóa chú thích/annotation (Modify annotations)',
+          fill: 'Khóa điền biểu mẫu (Fill forms)',
+          extract: 'Khóa trích xuất nội dung (Extract text/images)',
+          comment: 'Khóa bình luận/markup (Commenting/markup)',
+        },
+        passwordLegend: 'Password (tùy chọn) / Optional',
+        passwordHint: 'Để trống nếu chỉ muốn khóa restrictions mà không yêu cầu password mở file',
+        passwordLabel: 'Password:',
+        passwordConfirmLabel: 'Nhập lại Password:',
+        lockPdf: '🔒 Lock PDF / Khóa PDF',
+        lockPdfTitle: 'Khóa PDF với restrictions và password đã chọn',
+        unlockPdf: '🔓 Unlock PDF / Mở khóa PDF',
+        unlockPdfTitle: 'Mở khóa PDF',
+        profileHint: 'Profile mặc định: AES-256. Nếu môi trường không hỗ trợ, hệ thống tự fallback sang AES-128.',
+        encryptedState: 'Trạng thái mã hóa: file đang được bảo vệ (PDF Standard Security)',
+        unencryptedState: 'Trạng thái mã hóa: file chưa khóa (PDF Standard Security)',
+      },
+      runtime: {
+        memoryNotAvailable: 'N/A',
+        memoryContextTitle: 'Không thể đọc trực tiếp Browser Task Manager. Hiển thị context memory {raw}; tm~ {taskMgr}; scoped {scoped}; canvas {canvas}; buffer {buffer}.',
+        memoryEstimateTitle: 'Không thể đọc trực tiếp Browser Task Manager. Đây là số ước lượng tm~ từ heap {heap} + canvas {canvas} + buffer {buffer}.',
+        memoryUnsupportedTitle: 'Trình duyệt không hỗ trợ API cần thiết để đọc context memory hoặc ước lượng tm~.',
+      },
+      about: {
+        copyright: 'Copyright © 2026 by Hailúa',
+      },
+      msg: {
+        canvasToJpegFailed: 'Không thể chuyển canvas sang JPEG.',
+        fileLockedPrompt: 'File \'{fileName}\' bị khóa bằng password.\nNhập password để mở:',
+        invalidPasswordOrOpenFailed: 'Password không đúng hoặc file không thể mở.',
+        unlockPdfFailed: 'Không thể mở khóa file PDF:\n{error}',
+        noPdfToPurge: 'Chưa có file PDF để dọn cache.',
+        purgeMemoryFailed: 'Không thể dọn cache memory:\n{error}',
+        selectAddPositionPrompt: 'Mặc định PDF mới sẽ được thêm vào cuối PDF hiện tại.\n\nCó: Thêm vào cuối\nKhông: Thêm vào đầu\nHủy: Không thêm',
+        selectAddPositionPromptDefault: 'Mặc định PDF mới sẽ được thêm vào cuối PDF hiện tại.\n\nCó: Thêm vào cuối (mặc định)\nKhông: Thêm vào đầu\nHủy: Không thêm',
+        onlyPdfAllowed: 'Chỉ chấp nhận file PDF (.pdf)',
+        openMultipleSuccess: 'Đã mở {fileCount} file PDF với tổng {pageCount} trang.',
+        openPdfFailed: 'Không thể mở file PDF:\n{error}',
+        unsavedFilePrompt: 'File \'{fileName}\' có thay đổi chưa được lưu.\n\nBạn có muốn lưu file trước khi đóng không?',
+        rotateNeedSelection: 'Bạn chưa chọn trang nào để xoay.',
+        resetRotationNeedSelection: 'Vui lòng chọn ít nhất 1 trang để reset.',
+        moveNeedSelection: 'Vui lòng chọn ít nhất 1 trang để di chuyển.',
+        moveTopLimit: 'Không thể di chuyển - các trang đã ở vị trí đầu tiên.',
+        moveBottomLimit: 'Không thể di chuyển - các trang đã ở vị trí cuối cùng.',
+        deleteNeedSelection: 'Vui lòng chọn ít nhất 1 trang để xóa.',
+        deleteConfirm: 'Bạn có chắc chắn muốn xóa {count} trang được chọn?\n\n(Trang sẽ bị xóa khi lưu file)',
+        selectPdfFirst: 'Vui lòng chọn file PDF trước.',
+        readFileFailed: 'Không thể đọc file: {fileName}',
+        combinePdfFailed: 'Không thể gộp file PDF:\n{error}',
+        readCurrentPdfFailed: 'Không thể đọc dữ liệu PDF hiện tại để gộp file.',
+        mergePdfFailed: 'Không thể thêm file PDF:\n{error}',
+        mergePdfSuccess: 'Đã thêm {fileCount} file với tổng {pageCount} trang vào {position} file.',
+        nothingToSave: 'Chưa có file nào để lưu.',
+        saveUnchangedConfirm: 'Bạn chưa thực hiện chỉnh sửa/thay đổi trang nào. Bạn có muốn lưu nguyên bản gốc không?',
+        encryptedSaveReadFailed: 'Không thể đọc dữ liệu PDF mã hóa để lưu file.',
+        saveReadFailed: 'Không thể đọc dữ liệu PDF để lưu file.',
+        saveSuccess: 'Đã lưu file: {fileName}',
+        deletedPagesSummary: 'Đã xóa {count} trang.',
+        zoomRangeError: 'Tỷ lệ zoom phải nằm trong khoảng {min}% - {max}%',
+        resetAllPrompt: 'Bạn có chắc chắn muốn khôi phục toàn bộ những thay đổi?\n\n(Tất cả xoay trang, xóa trang và thêm trang sẽ bị hủy)',
+        originalDataMissing: 'Không tìm thấy dữ liệu PDF gốc để reset.',
+        resetAllSuccess: 'Đã khôi phục trạng thái gốc của file.',
+        lockNeedRestrictionOrPassword: 'Vui lòng chọn ít nhất 1 tính năng cần khóa hoặc nhập password.',
+        passwordMismatch: 'Password nhập lại không khớp.',
+        qpdfNotLoaded: 'Thư viện QPDF chưa được tải. Vui lòng tải lại extension.',
+        lockPdfFailed: 'Không thể khóa file PDF:\n{error}',
+        notLockedPdf: 'File PDF này không bị khóa.',
+        unlockSuccess: 'PDF đã được mở khóa thành công: {fileName}',
+        unlockError: 'Lỗi khi mở khóa PDF: {error}',
+        noValidPdfForOpen: 'Không có file PDF hợp lệ để mở.',
+        openFileFailed: 'Không thể mở file: {error}',
+        invalidPasswordTryAgain: 'Password không đúng. Vui lòng nhập lại hoặc nhấn Hủy.',
+        noPdfSourceToDisplay: 'Không có dữ liệu PDF để hiển thị.',
+        opfsReadFailed: 'Không thể đọc file PDF trong OPFS.',
+        noValidAutoOpenUrl: 'Không có URL file phù hợp để mở tự động.',
+        invalidAutoOpenUrl: 'URL PDF tự mở không hợp lệ.',
+        lanAutoOpenFailedPrompt: 'Extension đã thử lấy lại đường dẫn PDF thật từ tab browser, nhưng vẫn không thể đọc trực tiếp file mạng LAN (UNC).\n\nĐường dẫn nhận diện:\n{path}\n\nNhấn "Có" để mở hộp thoại chọn file giống nút "Open PDF".\n\nChi tiết: {detail}',
+        fileInputNotFound: 'Không tìm thấy thành phần file input.\nHãy nhấn nút "Open PDF" để chọn thủ công.',
+        browserBlockedPicker: 'Trình duyệt đã chặn việc mở file picker tự động.\nHãy nhấn nút "Open PDF" để chọn thủ công.',
+        autoOpenLocalFailedPrompt: 'Extension không thể đọc file PDF từ tab hiện tại.\n\n1) Bật quyền "Allow access to file URLs" cho extension trong chrome://extensions.\n2) Mở lại file PDF local rồi click lại icon extension.\n\nChi tiết: {detail}',
+        encryptionDetailNotSelected: 'chưa chọn file',
+        encryptionDetailNeedPassword: 'cần password để đọc quyền hiện tại',
+        encryptionDetailOpenedByPassword: 'đã mở bằng owner/user password',
+        encryptionDetailOwnerPassword: 'owner/user password',
+        encryptionDetailNoOpenPassword: 'không đặt password mở file',
+        encryptionDetailPartialMetadata: 'đã phát hiện mã hóa nhưng chưa đọc đủ metadata quyền',
+        encryptionDetailMetadataFallback: 'không đọc được metadata quyền, đang hiển thị mặc định không khóa',
+        qpdfInitFailed: 'Không thể khởi tạo QPDF Worker: {error}',
+        qpdfTimeout: 'QPDF timeout sau 60 giây.',
+        qpdfNoLogs: 'Không nhận được log nào từ QPDF Worker (có thể WASM chưa khởi tạo được).',
+      },
+      lockReport: {
+        successTitle: 'PDF đã được khóa thành công!',
+        fileLine: 'File: {fileName}',
+        profileLine: 'Profile mã hóa đã áp dụng: {profile}',
+        passwordSet: 'Password mở file: Đã thiết lập.',
+        passwordNotSet: 'Password mở file: Không đặt (chỉ khóa restrictions).',
+        restrictionsTitle: 'Danh sách restrictions đã khóa:',
+        noRestrictions: '- Không có',
+        compatibilityTitle: 'Lưu ý tương thích:',
+        compatibilityFallback: '• Môi trường đã dùng fallback AES-128 để tương thích.',
+        compatibilityGrouped: '• annotate/fill/comment được áp dụng theo nhóm modify.',
+      },
+    },
+    en: {
+      app: {
+        title: 'PDF Manager - Copyright © 2026 by Hailúa',
+      },
+      tabs: {
+        manager: 'PDF Manager',
+        lock: '🔒 PDF Lock/Unlock',
+      },
+      toolbar: {
+        languageToggleTitle: 'Switch EN/VI language',
+        themeToggleTitle: 'Choose Light/Dark/System theme mode',
+        themeSystem: 'System',
+        themeLight: 'Light',
+        themeDark: 'Dark',
+      },
+      common: {
+        ok: 'OK',
+        yes: 'Yes',
+        no: 'No',
+        cancel: 'Cancel',
+      },
+      dialog: {
+        error: 'Error',
+        warning: 'Warning',
+        info: 'Info',
+        success: 'Success',
+        saveError: 'Save Error',
+        confirm: 'Confirm',
+        confirmDelete: 'Confirm Delete',
+        confirmResetAll: 'Confirm Reset All',
+        addPdfPosition: 'Choose Add Position',
+        unsavedFile: 'Unsaved File',
+        fileLocked: 'Locked File',
+        autoOpenLanFailed: 'Cannot auto-open PDF from LAN share',
+        autoOpenLocalFailed: 'Cannot auto-open local PDF',
+        filePickerFailed: 'Cannot open file picker',
+        passwordPlaceholder: 'Enter password...',
+      },
+      manager: {
+        openPdf: '📂 Open PDF',
+        openPdfTitle: 'Choose a PDF to open and manage (or drag and drop into the content area)',
+        closePdf: '✖ Close PDF',
+        closePdfTitle: 'Close current PDF',
+        saveAsPdf: '💾 SaveAs PDF',
+        saveAsPdfTitle: 'Save a new PDF after editing',
+        addPdf: '➕ Add PDF',
+        addPdfTitle: 'Append other PDF files before or after current pages',
+        selectAll: '☑ Select All',
+        deselectAll: '☐ Deselect All',
+        selectAllTitle: 'Select or deselect all pages (Shift+Click to select range)',
+        rotateCw: '↻ +90°',
+        rotateCwTitle: 'Rotate selected pages 90° clockwise',
+        rotateCcw: '↺ -90°',
+        rotateCcwTitle: 'Rotate selected pages 90° counter-clockwise',
+        rotate180: '⇅ 180°',
+        rotate180Title: 'Rotate selected pages 180°',
+        rotateReset: '↺ Reset 0°',
+        rotateResetTitle: 'Reset selected pages to 0° (original orientation)',
+        moveUp: '⬆ Move Up',
+        moveUpTitle: 'Move selected pages up',
+        moveDown: '⬇ Move Down',
+        moveDownTitle: 'Move selected pages down',
+        delete: '🗑 Delete',
+        deleteTitle: 'Delete selected pages from list',
+        resetAll: '⎌ Reset All',
+        resetAllTitle: 'Undo all changes and reload the original PDF',
+        emptyTitle: 'No PDF opened yet',
+        emptyHintHtml: 'Click <strong>"Open PDF"</strong> or drag and drop PDF files here',
+        lowMemoryMode: 'Low-memory mode',
+        lowMemoryTitle: 'Reduce RAM/CPU usage on low-end devices (slower render)',
+        perfWidgetTitle: 'Estimated runtime resource usage of PDF Manager',
+        ramLabel: 'RAM:',
+        cpuLabel: 'CPU:',
+        purgeMemory: 'Purge Memory',
+        purgingMemory: 'Purging...',
+        purgeMemoryTitle: 'Purge temporary render cache to reduce RAM/CPU usage',
+        zoomLabel: 'Zoom (%):',
+        apply: 'Apply',
+        pageLabel: 'Page {page}',
+        fileNotSelected: 'No file selected',
+        fileOpeningMany: 'Opening: {count} PDF files',
+        fileOpeningSingle: 'Opening: {fileName}',
+        pageCount: 'Total pages: {total}',
+        pageCountWithVisible: 'Total pages: {total} ({visible} pages after save)',
+        selectedCount: '| Selected: {count}',
+        lazyStatus: '| Thumbnail mode: lazy-rendered | {engine} | {columns} columns | Zoom {zoom}% | Storage: {storage}',
+        tempPath: '| Temp path: {path}',
+        tempPathHintNone: 'No active temp data.',
+        storageOpfs: 'OPFS temp',
+        storageMemory: 'RAM fallback',
+        storageUnknown: '--',
+        dropOverlay: 'Drop PDF files here',
+        positionStart: 'start',
+        positionEnd: 'end',
+        unknownPath: '(unknown)',
+      },
+      lock: {
+        title: 'Tool Lock/Unlock PDF with Restrictions (AES-256 + AES-128 fallback)',
+        openPdfTitle: 'Choose a PDF to lock/unlock',
+        fileNotSelected: 'No file selected',
+        restrictionsLegend: 'Restrictions to lock',
+        resetRestrictions: '🔄 Reset restrictions',
+        resetRestrictionsTitle: 'Restore original PDF permissions',
+        selectAllRestrictions: '☑ Select all',
+        deselectAllRestrictions: '☐ Deselect all',
+        toggleRestrictionsTitle: 'Select or deselect all restrictions',
+        encryptionInitial: 'Encryption state: no file selected',
+        restriction: {
+          print: '🚫 Block document printing (Print)',
+          copy: '🚫 Block text/graphics copy (Copy text/graphics)',
+          modify: '🚫 Block content editing (Modify contents)',
+          annotate: '🚫 Block annotations (Modify annotations)',
+          fill: '🚫 Block form fill (Fill forms)',
+          extract: '🚫 Block content extraction (Extract text/images)',
+          comment: '🚫 Block comments/markup (Commenting/markup)',
+        },
+        restrictionLabel: {
+          print: 'Block document printing (Print)',
+          copy: 'Block text/graphics copy (Copy text/graphics)',
+          modify: 'Block content editing (Modify contents)',
+          annotate: 'Block annotations (Modify annotations)',
+          fill: 'Block form fill (Fill forms)',
+          extract: 'Block content extraction (Extract text/images)',
+          comment: 'Block comments/markup (Commenting/markup)',
+        },
+        passwordLegend: 'Password (optional)',
+        passwordHint: 'Leave empty if you only want restrictions without file-open password',
+        passwordLabel: 'Password:',
+        passwordConfirmLabel: 'Confirm password:',
+        lockPdf: '🔒 Lock PDF',
+        lockPdfTitle: 'Lock PDF with selected restrictions and password',
+        unlockPdf: '🔓 Unlock PDF',
+        unlockPdfTitle: 'Unlock PDF',
+        profileHint: 'Default profile: AES-256. If unsupported, it will fallback to AES-128 automatically.',
+        encryptedState: 'Encryption state: file is protected (PDF Standard Security)',
+        unencryptedState: 'Encryption state: file is not locked (PDF Standard Security)',
+      },
+      runtime: {
+        memoryNotAvailable: 'N/A',
+        memoryContextTitle: 'Cannot read Browser Task Manager directly. Showing context memory {raw}; tm~ {taskMgr}; scoped {scoped}; canvas {canvas}; buffer {buffer}.',
+        memoryEstimateTitle: 'Cannot read Browser Task Manager directly. This is an estimated tm~ from heap {heap} + canvas {canvas} + buffer {buffer}.',
+        memoryUnsupportedTitle: 'Browser does not support required APIs for context memory or tm~ estimate.',
+      },
+      about: {
+        copyright: 'Copyright © 2026 by Hailúa',
+      },
+      msg: {
+        canvasToJpegFailed: 'Cannot convert canvas to JPEG.',
+        fileLockedPrompt: 'File \'{fileName}\' is password-protected.\nEnter password to open:',
+        invalidPasswordOrOpenFailed: 'Invalid password or unable to open file.',
+        unlockPdfFailed: 'Cannot unlock PDF:\n{error}',
+        noPdfToPurge: 'No PDF available to purge cache.',
+        purgeMemoryFailed: 'Cannot purge memory cache:\n{error}',
+        selectAddPositionPrompt: 'By default, new PDFs are added to the end.\n\nYes: Add to end\nNo: Add to start\nCancel: Do not add',
+        selectAddPositionPromptDefault: 'By default, new PDFs are added to the end.\n\nYes: Add to end (default)\nNo: Add to start\nCancel: Do not add',
+        onlyPdfAllowed: 'Only PDF files are accepted (.pdf)',
+        openMultipleSuccess: 'Opened {fileCount} PDF files with {pageCount} total pages.',
+        openPdfFailed: 'Cannot open PDF file:\n{error}',
+        unsavedFilePrompt: 'File \'{fileName}\' has unsaved changes.\n\nDo you want to save before closing?',
+        rotateNeedSelection: 'No pages selected to rotate.',
+        resetRotationNeedSelection: 'Please select at least 1 page to reset.',
+        moveNeedSelection: 'Please select at least 1 page to move.',
+        moveTopLimit: 'Cannot move - selected pages are already at the beginning.',
+        moveBottomLimit: 'Cannot move - selected pages are already at the end.',
+        deleteNeedSelection: 'Please select at least 1 page to delete.',
+        deleteConfirm: 'Are you sure you want to delete {count} selected page(s)?\n\n(Pages are removed when saving)',
+        selectPdfFirst: 'Please select a PDF file first.',
+        readFileFailed: 'Cannot read file: {fileName}',
+        combinePdfFailed: 'Cannot combine PDF files:\n{error}',
+        readCurrentPdfFailed: 'Cannot read current PDF data to merge files.',
+        mergePdfFailed: 'Cannot add PDF files:\n{error}',
+        mergePdfSuccess: 'Added {fileCount} file(s) with {pageCount} page(s) to the {position} of current file.',
+        nothingToSave: 'No file available to save.',
+        saveUnchangedConfirm: 'No page edits were made. Do you want to save the original file anyway?',
+        encryptedSaveReadFailed: 'Cannot read encrypted PDF data for saving.',
+        saveReadFailed: 'Cannot read PDF data for saving.',
+        saveSuccess: 'Saved file: {fileName}',
+        deletedPagesSummary: 'Deleted {count} page(s).',
+        zoomRangeError: 'Zoom must be between {min}% and {max}%',
+        resetAllPrompt: 'Are you sure you want to reset all changes?\n\n(All rotations, deletions, and appended pages will be discarded)',
+        originalDataMissing: 'Original PDF data was not found for reset.',
+        resetAllSuccess: 'Original file state has been restored.',
+        lockNeedRestrictionOrPassword: 'Please select at least one restriction or enter a password.',
+        passwordMismatch: 'Password confirmation does not match.',
+        qpdfNotLoaded: 'QPDF library is not loaded. Please reload the extension.',
+        lockPdfFailed: 'Cannot lock PDF file:\n{error}',
+        notLockedPdf: 'This PDF is not locked.',
+        unlockSuccess: 'PDF unlocked successfully: {fileName}',
+        unlockError: 'Error while unlocking PDF: {error}',
+        noValidPdfForOpen: 'No valid PDF file found to open.',
+        openFileFailed: 'Cannot open file: {error}',
+        invalidPasswordTryAgain: 'Incorrect password. Please try again or click Cancel.',
+        noPdfSourceToDisplay: 'No PDF data available to render.',
+        opfsReadFailed: 'Cannot read PDF file from OPFS.',
+        noValidAutoOpenUrl: 'No suitable file URL for auto-open.',
+        invalidAutoOpenUrl: 'Invalid auto-open PDF URL.',
+        lanAutoOpenFailedPrompt: 'The extension tried resolving the actual PDF path from the browser tab, but still cannot access the LAN (UNC) file directly.\n\nDetected path:\n{path}\n\nPress "Yes" to open the same file picker as "Open PDF".\n\nDetail: {detail}',
+        fileInputNotFound: 'File input component was not found.\nPlease click "Open PDF" and choose manually.',
+        browserBlockedPicker: 'Browser blocked automatic file picker.\nPlease click "Open PDF" and choose manually.',
+        autoOpenLocalFailedPrompt: 'The extension cannot read the PDF from this tab.\n\n1) Enable "Allow access to file URLs" for this extension in chrome://extensions.\n2) Re-open the local PDF and click the extension icon again.\n\nDetail: {detail}',
+        encryptionDetailNotSelected: 'no file selected',
+        encryptionDetailNeedPassword: 'password required to inspect current permissions',
+        encryptionDetailOpenedByPassword: 'opened with owner/user password',
+        encryptionDetailOwnerPassword: 'owner/user password',
+        encryptionDetailNoOpenPassword: 'no open password set',
+        encryptionDetailPartialMetadata: 'encryption detected, but permission metadata is incomplete',
+        encryptionDetailMetadataFallback: 'permission metadata unavailable, showing unlocked defaults',
+        qpdfInitFailed: 'Cannot initialize QPDF Worker: {error}',
+        qpdfTimeout: 'QPDF timed out after 60 seconds.',
+        qpdfNoLogs: 'No logs received from QPDF Worker (WASM may not be initialized).',
+      },
+      lockReport: {
+        successTitle: 'PDF locked successfully!',
+        fileLine: 'File: {fileName}',
+        profileLine: 'Applied encryption profile: {profile}',
+        passwordSet: 'Open password: Set.',
+        passwordNotSet: 'Open password: Not set (restrictions only).',
+        restrictionsTitle: 'Locked restrictions:',
+        noRestrictions: '- None',
+        compatibilityTitle: 'Compatibility notes:',
+        compatibilityFallback: '• Environment used AES-128 fallback for compatibility.',
+        compatibilityGrouped: '• annotate/fill/comment are applied in the modify group.',
+      },
+    },
+  });
+
+  function resolveI18nValue(source, keyPath) {
+    if (!source || !keyPath) return undefined;
+    return String(keyPath)
+      .split('.')
+      .reduce((acc, key) => (acc && Object.prototype.hasOwnProperty.call(acc, key) ? acc[key] : undefined), source);
+  }
+
+  function formatText(template, params) {
+    if (typeof template !== 'string') return '';
+    if (!params) return template;
+    return template.replace(/\{([^}]+)\}/g, (_, key) => {
+      if (!Object.prototype.hasOwnProperty.call(params, key)) return `{${key}}`;
+      const value = params[key];
+      return value == null ? '' : String(value);
+    });
+  }
+
+  function getSystemLanguage() {
+    const langList = (typeof navigator !== 'undefined' && Array.isArray(navigator.languages) && navigator.languages.length)
+      ? navigator.languages
+      : [typeof navigator !== 'undefined' ? navigator.language : 'en'];
+    const hasVietnamese = langList.some((lang) => String(lang || '').toLowerCase().startsWith('vi'));
+    return hasVietnamese ? 'vi' : 'en';
+  }
+
+  function normalizeLanguage(lang) {
+    const normalized = String(lang || '').toLowerCase();
+    if (SUPPORTED_LANGUAGES.includes(normalized)) return normalized;
+    return 'en';
+  }
+
+  function normalizeThemeMode(mode) {
+    const normalized = String(mode || '').toLowerCase();
+    if (SUPPORTED_THEME_MODES.includes(normalized)) return normalized;
+    return 'system';
+  }
+
+  function readStoredLanguage() {
+    try {
+      const stored = localStorage.getItem(UI_LANG_STORAGE_KEY);
+      if (!stored) return getSystemLanguage();
+      return normalizeLanguage(stored);
+    } catch {
+      return getSystemLanguage();
+    }
+  }
+
+  function writeStoredLanguage(lang) {
+    try {
+      localStorage.setItem(UI_LANG_STORAGE_KEY, normalizeLanguage(lang));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  function readStoredThemeMode() {
+    try {
+      const stored = localStorage.getItem(UI_THEME_STORAGE_KEY);
+      return normalizeThemeMode(stored || 'system');
+    } catch {
+      return 'system';
+    }
+  }
+
+  function writeStoredThemeMode(mode) {
+    try {
+      localStorage.setItem(UI_THEME_STORAGE_KEY, normalizeThemeMode(mode));
+    } catch {
+      // Ignore storage failures.
+    }
+  }
+
+  let activeLanguage = readStoredLanguage();
+  let activeThemeMode = readStoredThemeMode();
+
+  function t(key, params) {
+    const selected = I18N_TEXT[activeLanguage] || I18N_TEXT.en;
+    const fallback = I18N_TEXT.en;
+    const raw = resolveI18nValue(selected, key) ?? resolveI18nValue(fallback, key) ?? key;
+    return formatText(raw, params);
+  }
+
+  function applyThemeMode(mode, opts) {
+    const persist = !(opts && opts.persist === false);
+    activeThemeMode = normalizeThemeMode(mode);
+    document.documentElement.dataset.theme = activeThemeMode;
+    if (persist) writeStoredThemeMode(activeThemeMode);
+    renderThemeToggleState();
+    return activeThemeMode;
+  }
+
+  function asCssContentString(text) {
+    const escaped = String(text || '')
+      .replace(/\\/g, '\\\\')
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\A ');
+    return `"${escaped}"`;
+  }
+
+  function applyI18nToDom(root) {
+    const scope = root || document;
+
+    scope.querySelectorAll('[data-i18n]').forEach((el) => {
+      const key = el.getAttribute('data-i18n');
+      if (!key) return;
+      el.textContent = t(key);
+    });
+
+    scope.querySelectorAll('[data-i18n-html]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-html');
+      if (!key) return;
+      el.innerHTML = t(key);
+    });
+
+    scope.querySelectorAll('[data-i18n-title]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-title');
+      if (!key) return;
+      el.title = t(key);
+    });
+
+    scope.querySelectorAll('[data-i18n-placeholder]').forEach((el) => {
+      const key = el.getAttribute('data-i18n-placeholder');
+      if (!key) return;
+      el.placeholder = t(key);
+    });
+  }
+
+  function renderLanguageToggleLabel() {
+    const btn = document.getElementById('btn-lang-toggle');
+    if (!btn) return;
+    btn.textContent = activeLanguage === 'vi' ? 'EN' : 'VI';
+  }
+
+  function renderThemeToggleState() {
+    const buttons = document.querySelectorAll('.tab-util-theme[data-theme-mode]');
+    buttons.forEach((btn) => {
+      const mode = String(btn.getAttribute('data-theme-mode') || '').toLowerCase();
+      const selected = mode === activeThemeMode;
+      btn.classList.toggle('active', selected);
+      btn.setAttribute('aria-pressed', selected ? 'true' : 'false');
+    });
+  }
+
+  function updateDragOverlayLanguage() {
+    const cssValue = asCssContentString(t('manager.dropOverlay'));
+    document.documentElement.style.setProperty('--drag-overlay-text', cssValue);
+  }
+
+  function applyLanguage(lang, opts) {
+    const persist = !(opts && opts.persist === false);
+    activeLanguage = normalizeLanguage(lang);
+    if (persist) writeStoredLanguage(activeLanguage);
+
+    document.documentElement.lang = activeLanguage;
+    document.title = t('app.title');
+    applyI18nToDom(document);
+    renderLanguageToggleLabel();
+    updateDragOverlayLanguage();
+
+    if (window._pdfManager && typeof window._pdfManager.onLanguageChanged === 'function') {
+      window._pdfManager.onLanguageChanged();
+    }
+    if (window._pdfLockTool && typeof window._pdfLockTool.onLanguageChanged === 'function') {
+      window._pdfLockTool.onLanguageChanged();
+    }
+
+    return activeLanguage;
+  }
+
+  function setupLanguageToggleButton() {
+    const btn = document.getElementById('btn-lang-toggle');
+    if (!btn) return;
+    btn.onclick = () => {
+      const next = activeLanguage === 'vi' ? 'en' : 'vi';
+      applyLanguage(next, { persist: true });
+    };
+  }
+
+  function setupThemeToggleButtons() {
+    const buttons = document.querySelectorAll('.tab-util-theme[data-theme-mode]');
+    if (!buttons.length) return;
+
+    buttons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const mode = normalizeThemeMode(btn.getAttribute('data-theme-mode'));
+        applyThemeMode(mode, { persist: true });
+      });
+    });
+
+    renderThemeToggleState();
+  }
+
+  const LEGACY_TITLE_TO_KEY = Object.freeze({
+    'Lỗi': 'dialog.error',
+    'Cảnh báo': 'dialog.warning',
+    'Thông báo': 'dialog.info',
+    'Thành công': 'dialog.success',
+    'Lỗi khi lưu': 'dialog.saveError',
+    'Xác nhận': 'dialog.confirm',
+    'Xác nhận xóa': 'dialog.confirmDelete',
+    'Xác nhận Reset All': 'dialog.confirmResetAll',
+    'Chọn vị trí thêm PDF': 'dialog.addPdfPosition',
+    'File chưa lưu': 'dialog.unsavedFile',
+    'File bị khóa': 'dialog.fileLocked',
+    'Không thể tự mở PDF từ thư mục mạng LAN': 'dialog.autoOpenLanFailed',
+    'Không thể tự mở PDF local': 'dialog.autoOpenLocalFailed',
+    'Không thể mở hộp thoại chọn file': 'dialog.filePickerFailed',
+  });
+
+  const LEGACY_STATIC_MESSAGE_TO_KEY = Object.freeze({
+    'Không thể chuyển canvas sang JPEG.': 'msg.canvasToJpegFailed',
+    'Password không đúng hoặc file không thể mở.': 'msg.invalidPasswordOrOpenFailed',
+    'Chưa có file PDF để dọn cache.': 'msg.noPdfToPurge',
+    'Mặc định PDF mới sẽ được thêm vào cuối PDF hiện tại.\n\nCó: Thêm vào cuối\nKhông: Thêm vào đầu\nHủy: Không thêm': 'msg.selectAddPositionPrompt',
+    'Mặc định PDF mới sẽ được thêm vào cuối PDF hiện tại.\n\nCó: Thêm vào cuối (mặc định)\nKhông: Thêm vào đầu\nHủy: Không thêm': 'msg.selectAddPositionPromptDefault',
+    'Chỉ chấp nhận file PDF (.pdf)': 'msg.onlyPdfAllowed',
+    'Bạn chưa chọn trang nào để xoay.': 'msg.rotateNeedSelection',
+    'Vui lòng chọn ít nhất 1 trang để reset.': 'msg.resetRotationNeedSelection',
+    'Vui lòng chọn ít nhất 1 trang để di chuyển.': 'msg.moveNeedSelection',
+    'Không thể di chuyển - các trang đã ở vị trí đầu tiên.': 'msg.moveTopLimit',
+    'Không thể di chuyển - các trang đã ở vị trí cuối cùng.': 'msg.moveBottomLimit',
+    'Vui lòng chọn ít nhất 1 trang để xóa.': 'msg.deleteNeedSelection',
+    'Vui lòng chọn file PDF trước.': 'msg.selectPdfFirst',
+    'Chưa có file nào để lưu.': 'msg.nothingToSave',
+    'Bạn chưa thực hiện chỉnh sửa/thay đổi trang nào. Bạn có muốn lưu nguyên bản gốc không?': 'msg.saveUnchangedConfirm',
+    'Không thể đọc dữ liệu PDF mã hóa để lưu file.': 'msg.encryptedSaveReadFailed',
+    'Không thể đọc dữ liệu PDF để lưu file.': 'msg.saveReadFailed',
+    'Bạn có chắc chắn muốn khôi phục toàn bộ những thay đổi?\n\n(Tất cả xoay trang, xóa trang và thêm trang sẽ bị hủy)': 'msg.resetAllPrompt',
+    'Không tìm thấy dữ liệu PDF gốc để reset.': 'msg.originalDataMissing',
+    'Đã khôi phục trạng thái gốc của file.': 'msg.resetAllSuccess',
+    'Vui lòng chọn ít nhất 1 tính năng cần khóa hoặc nhập password.': 'msg.lockNeedRestrictionOrPassword',
+    'Password nhập lại không khớp.': 'msg.passwordMismatch',
+    'Thư viện QPDF chưa được tải. Vui lòng tải lại extension.': 'msg.qpdfNotLoaded',
+    'File PDF này không bị khóa.': 'msg.notLockedPdf',
+    'Không có file PDF hợp lệ để mở.': 'msg.noValidPdfForOpen',
+    'Password không đúng. Vui lòng nhập lại hoặc nhấn Hủy.': 'msg.invalidPasswordTryAgain',
+    'Không có dữ liệu PDF để hiển thị.': 'msg.noPdfSourceToDisplay',
+    'Không thể đọc file PDF trong OPFS.': 'msg.opfsReadFailed',
+    'Không có URL file phù hợp để mở tự động.': 'msg.noValidAutoOpenUrl',
+    'URL PDF tự mở không hợp lệ.': 'msg.invalidAutoOpenUrl',
+  });
+
+  const LEGACY_DYNAMIC_TRANSLATORS = Object.freeze([
+    {
+      regex: /^File '(.+)' bị khóa bằng password\.\nNhập password để mở:$/s,
+      toText: (m) => t('msg.fileLockedPrompt', { fileName: m[1] || 'PDF' }),
+    },
+    {
+      regex: /^Không thể mở khóa file PDF:\n([\s\S]+)$/,
+      toText: (m) => t('msg.unlockPdfFailed', { error: m[1] }),
+    },
+    {
+      regex: /^Không thể dọn cache memory:\n([\s\S]+)$/,
+      toText: (m) => t('msg.purgeMemoryFailed', { error: m[1] }),
+    },
+    {
+      regex: /^Đã mở (\d+) file PDF với tổng (\d+) trang\.$/,
+      toText: (m) => t('msg.openMultipleSuccess', { fileCount: m[1], pageCount: m[2] }),
+    },
+    {
+      regex: /^Không thể mở file PDF:\n([\s\S]+)$/,
+      toText: (m) => t('msg.openPdfFailed', { error: m[1] }),
+    },
+    {
+      regex: /^File '(.+)' có thay đổi chưa được lưu\.\n\nBạn có muốn lưu file trước khi đóng không\?$/s,
+      toText: (m) => t('msg.unsavedFilePrompt', { fileName: m[1] }),
+    },
+    {
+      regex: /^Bạn có chắc chắn muốn xóa (\d+) trang được chọn\?\n\n\(Trang sẽ bị xóa khi lưu file\)$/s,
+      toText: (m) => t('msg.deleteConfirm', { count: m[1] }),
+    },
+    {
+      regex: /^Không thể đọc file: (.+)$/,
+      toText: (m) => t('msg.readFileFailed', { fileName: m[1] }),
+    },
+    {
+      regex: /^Không thể gộp file PDF:\n([\s\S]+)$/,
+      toText: (m) => t('msg.combinePdfFailed', { error: m[1] }),
+    },
+    {
+      regex: /^Không thể thêm file PDF:\n([\s\S]+)$/,
+      toText: (m) => t('msg.mergePdfFailed', { error: m[1] }),
+    },
+    {
+      regex: /^Đã thêm (\d+) file với tổng (\d+) trang vào (đầu|cuối) file\.$/,
+      toText: (m) => t('msg.mergePdfSuccess', {
+        fileCount: m[1],
+        pageCount: m[2],
+        position: m[3] === 'đầu' ? t('manager.positionStart') : t('manager.positionEnd'),
+      }),
+    },
+    {
+      regex: /^Đã lưu file: ([^\n]+)(?:\n\nĐã xóa (\d+) trang\.)?$/s,
+      toText: (m) => {
+        const base = t('msg.saveSuccess', { fileName: m[1] });
+        if (!m[2]) return base;
+        return `${base}\n\n${t('msg.deletedPagesSummary', { count: m[2] })}`;
+      },
+    },
+    {
+      regex: /^Tỷ lệ zoom phải nằm trong khoảng (\d+)% - (\d+)%$/,
+      toText: (m) => t('msg.zoomRangeError', { min: m[1], max: m[2] }),
+    },
+    {
+      regex: /^Không thể mở file: ([\s\S]+)$/,
+      toText: (m) => t('msg.openFileFailed', { error: m[1] }),
+    },
+    {
+      regex: /^PDF đã được mở khóa thành công: (.+)$/,
+      toText: (m) => t('msg.unlockSuccess', { fileName: m[1] }),
+    },
+    {
+      regex: /^Lỗi khi mở khóa PDF: ([\s\S]+)$/,
+      toText: (m) => t('msg.unlockError', { error: m[1] }),
+    },
+    {
+      regex: /^Extension đã thử lấy lại đường dẫn PDF thật từ tab browser, nhưng vẫn không thể đọc trực tiếp file mạng LAN \(UNC\)\.\n\nĐường dẫn nhận diện:\n([\s\S]+?)\n\nNhấn "Có" để mở hộp thoại chọn file giống nút "Open PDF"\.\n\nChi tiết: ([\s\S]+)$/,
+      toText: (m) => t('msg.lanAutoOpenFailedPrompt', { path: m[1], detail: m[2] }),
+    },
+    {
+      regex: /^Extension không thể đọc file PDF từ tab hiện tại\.\n\n1\) Bật quyền "Allow access to file URLs" cho extension trong chrome:\/\/extensions\.\n2\) Mở lại file PDF local rồi click lại icon extension\.\n\nChi tiết: ([\s\S]+)$/,
+      toText: (m) => t('msg.autoOpenLocalFailedPrompt', { detail: m[1] }),
+    },
+    {
+      regex: /^Không thể khóa file PDF:\n([\s\S]+)$/,
+      toText: (m) => t('msg.lockPdfFailed', { error: m[1] }),
+    },
+    {
+      regex: /^Không thể khởi tạo QPDF Worker: ([\s\S]+)$/,
+      toText: (m) => t('msg.qpdfInitFailed', { error: m[1] }),
+    },
+  ]);
+
+  function translateLegacyDialogTitle(inputTitle) {
+    if (typeof inputTitle !== 'string' || !inputTitle.length) return inputTitle;
+    const key = LEGACY_TITLE_TO_KEY[inputTitle];
+    return key ? t(key) : inputTitle;
+  }
+
+  function translateLegacyMessageText(inputMessage) {
+    if (typeof inputMessage !== 'string' || !inputMessage.length) return inputMessage;
+
+    const staticKey = LEGACY_STATIC_MESSAGE_TO_KEY[inputMessage];
+    if (staticKey) return t(staticKey);
+
+    for (const item of LEGACY_DYNAMIC_TRANSLATORS) {
+      const match = inputMessage.match(item.regex);
+      if (!match) continue;
+      try {
+        return item.toText(match);
+      } catch {
+        return inputMessage;
+      }
+    }
+
+    return inputMessage;
+  }
 
   const TEMP_OBJECT_URLS = new Set();
   let opfsDirPromise = null;
@@ -131,6 +944,7 @@
   }
 
   setActivePerfMode(readStoredPerfMode(), { persist: false });
+  applyThemeMode(activeThemeMode, { persist: false });
 
   function trackTempObjectUrl(url) {
     TEMP_OBJECT_URLS.add(url);
@@ -495,7 +1309,7 @@
       const blob = await new Promise((resolve, reject) => {
         canvas.toBlob((b) => {
           if (b) resolve(b);
-          else reject(new Error('Không thể chuyển canvas sang JPEG.'));
+          else reject(new Error(t('msg.canvasToJpegFailed')));
         }, 'image/jpeg', quality);
       });
       const bytes = new Uint8Array(await blob.arrayBuffer());
@@ -512,8 +1326,10 @@
   function showModal(title, message, buttons, opts) {
     return new Promise(resolve => {
       const overlay = document.getElementById('modal-overlay');
-      document.getElementById('modal-title').textContent = title;
-      document.getElementById('modal-message').textContent = message;
+      const resolvedTitle = translateLegacyDialogTitle(title);
+      const resolvedMessage = translateLegacyMessageText(message);
+      document.getElementById('modal-title').textContent = resolvedTitle;
+      document.getElementById('modal-message').textContent = resolvedMessage;
       const btnContainer = document.getElementById('modal-buttons');
       const inputRow = document.getElementById('modal-input-row');
       const inputEl = document.getElementById('modal-input');
@@ -522,7 +1338,7 @@
       if (opts && opts.input) {
         inputRow.classList.remove('hidden');
         inputEl.type = opts.inputType || 'text';
-        inputEl.placeholder = opts.placeholder || '';
+        inputEl.placeholder = translateLegacyMessageText(opts.placeholder || '');
         inputEl.value = '';
       } else {
         inputRow.classList.add('hidden');
@@ -548,29 +1364,29 @@
   }
 
   async function showAlert(title, msg) {
-    return showModal(title, msg, [{ text: 'OK', value: true, className: 'modal-btn-primary' }]);
+    return showModal(title, msg, [{ text: t('common.ok'), value: true, className: 'modal-btn-primary' }]);
   }
 
   async function showConfirm(title, msg) {
     return showModal(title, msg, [
-      { text: 'Không', value: false, className: '' },
-      { text: 'Có', value: true, className: 'modal-btn-primary' },
+      { text: t('common.no'), value: false, className: '' },
+      { text: t('common.yes'), value: true, className: 'modal-btn-primary' },
     ]);
   }
 
   async function showYesNoCancel(title, msg) {
     return showModal(title, msg, [
-      { text: 'Hủy', value: null, className: '' },
-      { text: 'Không', value: false, className: '' },
-      { text: 'Có', value: true, className: 'modal-btn-primary' },
+      { text: t('common.cancel'), value: null, className: '' },
+      { text: t('common.no'), value: false, className: '' },
+      { text: t('common.yes'), value: true, className: 'modal-btn-primary' },
     ]);
   }
 
   async function showPasswordPrompt(title, msg) {
     return showModal(title, msg, [
-      { text: 'Hủy', value: 'cancel', className: '' },
-      { text: 'OK', value: 'ok', className: 'modal-btn-primary' },
-    ], { input: true, inputType: 'password', placeholder: 'Nhập password...' });
+      { text: t('common.cancel'), value: 'cancel', className: '' },
+      { text: t('common.ok'), value: 'ok', className: 'modal-btn-primary' },
+    ], { input: true, inputType: 'password', placeholder: t('dialog.passwordPlaceholder') });
   }
 
   // =================== Unlock PDF Utility ===================
@@ -1352,9 +2168,9 @@
     }
 
     getStorageModeLabel() {
-      if (this.sourceStorageMode === 'opfs') return 'OPFS temp';
-      if (this.sourceStorageMode === 'memory') return 'RAM fallback';
-      return '--';
+      if (this.sourceStorageMode === 'opfs') return t('manager.storageOpfs');
+      if (this.sourceStorageMode === 'memory') return t('manager.storageMemory');
+      return t('manager.storageUnknown');
     }
 
     getTempPathLabel() {
@@ -1370,9 +2186,9 @@
     updateTempPathStatus() {
       if (!this.dom.tempPathStatus) return;
       const tempPath = this.getTempPathLabel();
-      this.dom.tempPathStatus.textContent = `| Temp path: ${tempPath}`;
+      this.dom.tempPathStatus.textContent = t('manager.tempPath', { path: tempPath });
       this.dom.tempPathStatus.title = tempPath === '--'
-        ? 'Chưa có dữ liệu temp đang hoạt động.'
+        ? t('manager.tempPathHintNone')
         : tempPath;
     }
 
@@ -1390,8 +2206,12 @@
       const engine = this.getLazyRenderEngineLabel();
       const storage = this.getStorageModeLabel();
 
-      this.dom.lazyRenderStatus.textContent =
-        `| Thumbnail mode: lazy-rendered | ${engine} | ${columns} columns | Zoom ${zoomPercent}% | Storage: ${storage}`;
+      this.dom.lazyRenderStatus.textContent = t('manager.lazyStatus', {
+        engine,
+        columns,
+        zoom: zoomPercent,
+        storage,
+      });
       this.updateTempPathStatus();
     }
 
@@ -1625,7 +2445,7 @@
     getNetworkShareDisplayPath(pdfUrl) {
       const normalized = this.normalizeAutoOpenPdfUrl(pdfUrl);
       const uncPath = this.extractUncPathFromFileUrl(normalized || pdfUrl);
-      return uncPath || normalized || pdfUrl || '(không xác định)';
+      return uncPath || normalized || pdfUrl || t('manager.unknownPath');
     }
 
     triggerOpenPdfPicker() {
@@ -1653,19 +2473,16 @@
       const displayPath = this.getNetworkShareDisplayPath(pdfUrl);
 
       const confirmed = await showConfirm(
-        'Không thể tự mở PDF từ thư mục mạng LAN',
-        'Extension đã thử lấy lại đường dẫn PDF thật từ tab browser, nhưng vẫn không thể đọc trực tiếp file mạng LAN (UNC).\n\n'
-        + `Đường dẫn nhận diện:\n${displayPath}\n\n`
-        + 'Nhấn "Có" để mở hộp thoại chọn file giống nút "Open PDF".\n\n'
-        + `Chi tiết: ${detail}`
+        t('dialog.autoOpenLanFailed'),
+        t('msg.lanAutoOpenFailedPrompt', { path: displayPath, detail })
       );
 
       if (!confirmed) return false;
 
       if (!(this.dom && this.dom.fileInput)) {
         await showAlert(
-          'Không thể mở hộp thoại chọn file',
-          'Không tìm thấy thành phần file input.\nHãy nhấn nút "Open PDF" để chọn thủ công.'
+          t('dialog.filePickerFailed'),
+          t('msg.fileInputNotFound')
         );
         return false;
       }
@@ -1675,8 +2492,8 @@
       }
 
       await showAlert(
-        'Không thể mở hộp thoại chọn file',
-        'Trình duyệt đã chặn việc mở file picker tự động.\nHãy nhấn nút "Open PDF" để chọn thủ công.'
+        t('dialog.filePickerFailed'),
+        t('msg.browserBlockedPicker')
       );
       return false;
     }
@@ -1696,7 +2513,7 @@
       }
 
       if (lastError) throw lastError;
-      throw new Error('Không có URL file phù hợp để mở tự động.');
+      throw new Error(t('msg.noValidAutoOpenUrl'));
     }
 
     async resolveAutoOpenPdfUrlFromBackground(sourceTabId) {
@@ -1731,10 +2548,10 @@
 
     async tryAutoOpenFromPdfUrl(pdfUrl) {
       const normalized = this.normalizeAutoOpenPdfUrl(pdfUrl);
-      if (!normalized) throw new Error('URL PDF tự mở không hợp lệ.');
+      if (!normalized) throw new Error(t('msg.invalidAutoOpenUrl'));
 
       const candidates = this.buildAutoOpenPdfUrlCandidates(normalized);
-      if (!candidates.length) throw new Error('Không có URL file phù hợp để mở tự động.');
+      if (!candidates.length) throw new Error(t('msg.noValidAutoOpenUrl'));
 
       const loaded = await this.fetchPdfBytesFromCandidates(candidates);
       const fileName = this.getFileNameFromPdfUrl(loaded.url || normalized);
@@ -1815,11 +2632,8 @@
       }
 
       await showAlert(
-        'Không thể tự mở PDF local',
-        'Extension không thể đọc file PDF từ tab hiện tại.\n\n'
-        + '1) Bật quyền "Allow access to file URLs" cho extension trong chrome://extensions.\n'
-        + '2) Mở lại file PDF local rồi click lại icon extension.\n\n'
-        + `Chi tiết: ${detail}`
+        t('dialog.autoOpenLocalFailed'),
+        t('msg.autoOpenLocalFailedPrompt', { detail })
       );
     }
 
@@ -2042,19 +2856,29 @@
         const raw = this.formatBytes(metric.bytesUsed);
         const tmEst = this.formatBytes(metric.taskMgrEstimateBytes || metric.bytesUsed);
         this.dom.perfRam.textContent = `${raw} (ctx)`;
-        this.dom.perfRam.title = `Không thể đọc trực tiếp Browser Task Manager. Hiển thị context memory ${raw}; tm~ ${tmEst}; scoped ${this.formatBytes(metric.scopedBytes)}; canvas ${this.formatBytes(metric.canvasBytes)}; buffer ${this.formatBytes(metric.bufferBytes)}.`;
+        this.dom.perfRam.title = t('runtime.memoryContextTitle', {
+          raw,
+          taskMgr: tmEst,
+          scoped: this.formatBytes(metric.scopedBytes),
+          canvas: this.formatBytes(metric.canvasBytes),
+          buffer: this.formatBytes(metric.bufferBytes),
+        });
         return;
       }
 
       if (metric.kind === 'heap-est') {
         const est = this.formatBytes(metric.taskMgrEstimateBytes || metric.bytesUsed);
         this.dom.perfRam.textContent = `${est} (tm~)`;
-        this.dom.perfRam.title = `Không thể đọc trực tiếp Browser Task Manager. Đây là số ước lượng tm~ từ heap ${this.formatBytes(metric.heapBytes)} + canvas ${this.formatBytes(metric.canvasBytes)} + buffer ${this.formatBytes(metric.bufferBytes)}.`;
+        this.dom.perfRam.title = t('runtime.memoryEstimateTitle', {
+          heap: this.formatBytes(metric.heapBytes),
+          canvas: this.formatBytes(metric.canvasBytes),
+          buffer: this.formatBytes(metric.bufferBytes),
+        });
         return;
       }
 
-      this.dom.perfRam.textContent = 'N/A';
-      this.dom.perfRam.title = 'Trình duyệt không hỗ trợ API cần thiết để đọc context memory hoặc ước lượng tm~.';
+      this.dom.perfRam.textContent = t('runtime.memoryNotAvailable');
+      this.dom.perfRam.title = t('runtime.memoryUnsupportedTitle');
     }
 
     renderRuntimeStats(resetWindow) {
@@ -2084,7 +2908,7 @@
 
     async handlePurgeMemoryClick() {
       if (!this.hasPdfSource()) {
-        await showAlert('Thông báo', 'Chưa có file PDF để dọn cache.');
+        await showAlert('Thông báo', t('msg.noPdfToPurge'));
         return;
       }
 
@@ -2110,7 +2934,7 @@
       const btn = this.dom.btnPurgeMemory;
       if (btn && !isAuto) {
         btn.disabled = true;
-        btn.textContent = 'Purging...';
+        btn.textContent = t('manager.purgingMemory');
       }
 
       try {
@@ -2148,7 +2972,7 @@
         return true;
       } catch (err) {
         if (showErrorAlert) {
-          await showAlert('Lỗi', 'Không thể dọn cache memory:\n' + err.message);
+          await showAlert('Lỗi', t('msg.purgeMemoryFailed', { error: err.message }));
         } else {
           console.warn('Auto purge memory failed:', options.source || 'auto', err);
         }
@@ -2156,7 +2980,7 @@
       } finally {
         this._purgeInProgress = false;
         if (btn && !isAuto) {
-          btn.textContent = 'Purge Memory';
+          btn.textContent = t('manager.purgeMemory');
           btn.disabled = !this.hasPdfSource();
         }
       }
@@ -2695,7 +3519,7 @@
           const placeholder = document.createElement('div');
           placeholder.className = 'empty-placeholder';
           placeholder.id = 'empty-placeholder';
-          placeholder.innerHTML = '<p class="empty-icon">📄</p><p>Chưa mở file PDF nào</p><p class="empty-hint">Nhấn <strong>"Open PDF"</strong> hoặc kéo thả file PDF vào đây</p>';
+          placeholder.innerHTML = `<p class="empty-icon">📄</p><p>${t('manager.emptyTitle')}</p><p class="empty-hint">${t('manager.emptyHintHtml')}</p>`;
           this.dom.pagesGrid.appendChild(placeholder);
         }
       }
@@ -2789,7 +3613,7 @@
 
       const label = document.createElement('span');
       label.className = 'page-label';
-      label.textContent = `Trang ${origIdx + 1}`;
+      label.textContent = t('manager.pageLabel', { page: origIdx + 1 });
 
       const rotLabel = document.createElement('span');
       rotLabel.className = 'page-rotation';
@@ -2849,6 +3673,7 @@
         canvasWrap,
         canvas,
         checkbox,
+        label,
         rotLabel,
         origIdx,
         visualIdx,
@@ -3130,7 +3955,7 @@
           el.checkbox.checked = false;
           el.container.classList.remove('selected');
         });
-        this.dom.btnSelectAll.textContent = '☑ Select All';
+        this.dom.btnSelectAll.textContent = t('manager.selectAll');
       } else {
         // Select all
         this.pageElements.forEach((el, vi) => {
@@ -3138,7 +3963,7 @@
           el.checkbox.checked = true;
           el.container.classList.add('selected');
         });
-        this.dom.btnSelectAll.textContent = '☐ Deselect All';
+        this.dom.btnSelectAll.textContent = t('manager.deselectAll');
       }
       this.updateSelectedCount();
     }
@@ -3150,7 +3975,7 @@
         el.checkbox.checked = false;
         el.container.classList.remove('selected');
       });
-      this.dom.btnSelectAll.textContent = '☑ Select All';
+      this.dom.btnSelectAll.textContent = t('manager.selectAll');
       this.updateSelectedCount();
     }
 
@@ -3755,11 +4580,11 @@
     // === UI Updates ===
     updateFileInfo() {
       if (!this.hasPdfSource()) {
-        this.dom.fileInfo.textContent = 'Chưa chọn file nào';
+        this.dom.fileInfo.textContent = t('manager.fileNotSelected');
       } else if (this.openedFileCount > 1) {
-        this.dom.fileInfo.textContent = `Đang mở: ${this.openedFileCount} file PDF`;
+        this.dom.fileInfo.textContent = t('manager.fileOpeningMany', { count: this.openedFileCount });
       } else {
-        this.dom.fileInfo.textContent = `Đang mở: ${this.fileName}`;
+        this.dom.fileInfo.textContent = t('manager.fileOpeningSingle', { fileName: this.fileName });
       }
     }
 
@@ -3767,13 +4592,37 @@
       const total = this.pdfDoc ? this.pdfDoc.numPages : 0;
       const visible = this.pageOrder.length;
       const deleted = total - visible;
-      let text = `Tổng số trang: ${total}`;
-      if (deleted > 0) text += ` (sẽ còn ${visible} trang)`;
+      let text = t('manager.pageCount', { total });
+      if (deleted > 0) text = t('manager.pageCountWithVisible', { total, visible });
       this.dom.pageCount.textContent = text;
     }
 
     updateSelectedCount() {
-      this.dom.selectedCount.textContent = `| Đã chọn: ${this.selectedPages.size}`;
+      this.dom.selectedCount.textContent = t('manager.selectedCount', { count: this.selectedPages.size });
+    }
+
+    onLanguageChanged() {
+      this.pageElements.forEach((el) => {
+        if (!el || !el.label) return;
+        el.label.textContent = t('manager.pageLabel', { page: el.origIdx + 1 });
+      });
+
+      if (this.dom.btnSelectAll) {
+        const allSelected = this.pageElements.length > 0 && this.selectedPages.size === this.pageElements.length;
+        this.dom.btnSelectAll.textContent = allSelected
+          ? t('manager.deselectAll')
+          : t('manager.selectAll');
+      }
+
+      if (this.dom.btnPurgeMemory && !this._purgeInProgress) {
+        this.dom.btnPurgeMemory.textContent = t('manager.purgeMemory');
+      }
+
+      this.updateFileInfo();
+      this.updatePageCount();
+      this.updateSelectedCount();
+      this.updateLazyRenderStatus();
+      if (!this.hasPdfSource()) this.showEmptyPlaceholder(true);
     }
 
     setUiState(hasPdf) {
@@ -3802,14 +4651,14 @@
       this.sourceWasEncrypted = false;
       this.initialRestrictions = {};
       this.selectAllState = false;
-      this.restrictionLabels = Object.freeze({
-        print: 'Khóa in tài liệu (Print)',
-        copy: 'Khóa sao chép văn bản/đồ họa (Copy text/graphics)',
-        modify: 'Khóa chỉnh sửa nội dung (Modify contents)',
-        annotate: 'Khóa chú thích/annotation (Modify annotations)',
-        fill: 'Khóa điền biểu mẫu (Fill forms)',
-        extract: 'Khóa trích xuất nội dung (Extract text/images)',
-        comment: 'Khóa bình luận/markup (Commenting/markup)',
+      this.restrictionLabelKeys = Object.freeze({
+        print: 'lock.restrictionLabel.print',
+        copy: 'lock.restrictionLabel.copy',
+        modify: 'lock.restrictionLabel.modify',
+        annotate: 'lock.restrictionLabel.annotate',
+        fill: 'lock.restrictionLabel.fill',
+        extract: 'lock.restrictionLabel.extract',
+        comment: 'lock.restrictionLabel.comment',
       });
       this.dom = {};
       this._onPageHide = () => this.dispose();
@@ -3851,8 +4700,8 @@
 
       // Drag and drop support for Lock tab
       this.setupDragDrop();
-      this.dom.btnToggle.textContent = '☑ Chọn tất cả / Select all';
-      this.setEncryptionInfoState(false, 'chưa chọn file');
+      this.dom.btnToggle.textContent = t('lock.selectAllRestrictions');
+      this.setEncryptionInfoState(false, t('msg.encryptionDetailNotSelected'));
     }
 
     setupDragDrop() {
@@ -3919,7 +4768,7 @@
         this.sourceOpenPassword = '';
         this.sourceWasEncrypted = false;
         this.dom.fileInfo.textContent = file.name;
-        this.dom.fileInfo.style.color = '#000';
+        this.dom.fileInfo.style.color = '';
         this.dom.password.value = '';
         this.dom.passwordConfirm.value = '';
         this.applyRestrictionsState({});
@@ -3934,8 +4783,8 @@
 
     setEncryptionInfoState(isEncrypted, detailText) {
       const baseText = isEncrypted
-        ? 'Trạng thái mã hóa: file đang được bảo vệ (PDF Standard Security)'
-        : 'Trạng thái mã hóa: file chưa khóa (PDF Standard Security)';
+        ? t('lock.encryptedState')
+        : t('lock.unencryptedState');
       this.dom.encryptionInfo.textContent = detailText ? `${baseText} (${detailText})` : baseText;
       this.dom.encryptionInfo.style.color = isEncrypted ? '#2d8f00' : '#de5602';
     }
@@ -3953,12 +4802,13 @@
       const allChecked = boxes.length > 0 && boxes.every(cb => cb.checked);
       this.selectAllState = allChecked;
       this.dom.btnToggle.textContent = allChecked
-        ? '☐ Bỏ chọn tất cả / Deselect all'
-        : '☑ Chọn tất cả / Select all';
+        ? t('lock.deselectAllRestrictions')
+        : t('lock.selectAllRestrictions');
     }
 
     getRestrictionLabel(key) {
-      return this.restrictionLabels[key] || key;
+      const keyPath = this.restrictionLabelKeys[key];
+      return keyPath ? t(keyPath) : key;
     }
 
     getSelectedRestrictionLabels(restrictions) {
@@ -4017,7 +4867,7 @@
             const opened = await this.promptForOpenPassword(this.fileName, bytes);
             if (!opened) {
               this.sourceWasEncrypted = true;
-              this.setEncryptionInfoState(true, 'cần password để đọc quyền hiện tại');
+              this.setEncryptionInfoState(true, t('msg.encryptionDetailNeedPassword'));
               this.applyRestrictionsState({});
               this.initialRestrictions = this.getCurrentRestrictions();
               return;
@@ -4042,7 +4892,9 @@
         if (detectedEncrypted) {
           this.setEncryptionInfoState(
             true,
-            this.sourceOpenPassword ? 'đã mở bằng owner/user password' : 'owner/user password'
+            this.sourceOpenPassword
+              ? t('msg.encryptionDetailOpenedByPassword')
+              : t('msg.encryptionDetailOwnerPassword')
           );
 
           const mapping = {
@@ -4073,7 +4925,7 @@
 
           this.applyRestrictionsState(mapping);
         } else {
-          this.setEncryptionInfoState(false, 'không đặt password mở file');
+          this.setEncryptionInfoState(false, t('msg.encryptionDetailNoOpenPassword'));
           this.applyRestrictionsState({});
         }
 
@@ -4081,10 +4933,10 @@
       } catch (err) {
         console.warn('[Lock PDF] Không thể đọc thông tin mã hóa:', err);
         if (this.sourceWasEncrypted) {
-          this.setEncryptionInfoState(true, 'đã phát hiện mã hóa nhưng chưa đọc đủ metadata quyền');
+          this.setEncryptionInfoState(true, t('msg.encryptionDetailPartialMetadata'));
           this.applyRestrictionsState({});
         } else {
-          this.setEncryptionInfoState(false, 'không đọc được metadata quyền, đang hiển thị mặc định không khóa');
+          this.setEncryptionInfoState(false, t('msg.encryptionDetailMetadataFallback'));
           this.applyRestrictionsState({});
         }
         this.initialRestrictions = this.getCurrentRestrictions();
@@ -4121,14 +4973,14 @@
       Object.values(this.checkboxes).forEach(cb => { cb.checked = this.selectAllState; });
       Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
       this.dom.btnToggle.textContent = this.selectAllState
-        ? '☐ Bỏ chọn tất cả / Deselect all'
-        : '☑ Chọn tất cả / Select all';
+        ? t('lock.deselectAllRestrictions')
+        : t('lock.selectAllRestrictions');
     }
 
     async lockPdf() {
       const sourceBytes = await this.readLockBytes();
       if (!sourceBytes) {
-        await showAlert('Cảnh báo', 'Vui lòng chọn file PDF trước!');
+        await showAlert('Cảnh báo', t('msg.selectPdfFirst'));
         return;
       }
 
@@ -4235,7 +5087,7 @@
               },
               onError: (err) => {
                 console.error('[Lock PDF] QPDF init error:', err.message);
-                finish(new Error('Không thể khởi tạo QPDF Worker: ' + err.message));
+                finish(new Error(t('msg.qpdfInitFailed', { error: err.message })));
               },
               ready: async (qpdf) => {
                 qpdfInstance = qpdf;
@@ -4315,7 +5167,7 @@
               },
             });
           } catch (e) {
-            finish(new Error('Không thể khởi tạo QPDF Worker: ' + e.message));
+            finish(new Error(t('msg.qpdfInitFailed', { error: e.message })));
           }
 
           // Timeout with diagnostic info
@@ -4323,8 +5175,8 @@
             if (!done) {
               const logSummary = qpdfLogs.length > 0
                 ? '\n\nQPDF logs:\n' + qpdfLogs.slice(-10).join('\n')
-                : '\n\nKhông nhận được log nào từ QPDF Worker (có thể WASM chưa khởi tạo được).';
-              finish(new Error('QPDF timeout sau 60 giây.' + logSummary));
+                : `\n\n${t('msg.qpdfNoLogs')}`;
+              finish(new Error(t('msg.qpdfTimeout') + logSummary));
             }
           }, 60000);
         });
@@ -4335,44 +5187,44 @@
         const selectedRestrictionLabels = this.getSelectedRestrictionLabels(restrictions);
         const restrictionsSummary = selectedRestrictionLabels.length
           ? selectedRestrictionLabels.map(label => `- ${label}`).join('\n')
-          : '- Không có / None';
+          : t('lockReport.noRestrictions');
         const encryptionProfileLabel = appliedEncryptionKeyBits === DEFAULT_ENCRYPTION_KEY_BITS
           ? 'AES-256 (primary profile)'
           : 'AES-128 (fallback profile)';
 
         const compatibilityNotes = [];
         if (appliedEncryptionKeyBits !== DEFAULT_ENCRYPTION_KEY_BITS) {
-          compatibilityNotes.push('• Môi trường đã dùng fallback AES-128 để tương thích.');
+          compatibilityNotes.push(t('lockReport.compatibilityFallback'));
         }
         if (restrictions.annotate || restrictions.fill || restrictions.comment) {
-          compatibilityNotes.push('• annotate/fill/comment được áp dụng theo nhóm modify.');
+          compatibilityNotes.push(t('lockReport.compatibilityGrouped'));
         }
         const compatibilityText = compatibilityNotes.length
-          ? `\n\nLưu ý tương thích:\n${compatibilityNotes.join('\n')}`
+          ? `\n\n${t('lockReport.compatibilityTitle')}\n${compatibilityNotes.join('\n')}`
           : '';
 
         downloadBlob(lockedBytes, outputName);
         await showAlert('Thành công',
-          `PDF đã được khóa thành công!\n\n` +
-          `File: ${outputName}\n` +
-          `Profile mã hóa đã áp dụng / Applied encryption profile: ${encryptionProfileLabel}\n` +
+          `${t('lockReport.successTitle')}\n\n` +
+          `${t('lockReport.fileLine', { fileName: outputName })}\n` +
+          `${t('lockReport.profileLine', { profile: encryptionProfileLabel })}\n` +
           (password
-            ? 'Password mở file: Đã thiết lập.\n'
-            : 'Password mở file: Không đặt (chỉ khóa restrictions).\n') +
-          `Danh sách restrictions đã khóa / Locked restrictions:\n${restrictionsSummary}` +
+            ? `${t('lockReport.passwordSet')}\n`
+            : `${t('lockReport.passwordNotSet')}\n`) +
+          `${t('lockReport.restrictionsTitle')}\n${restrictionsSummary}` +
           compatibilityText
         );
         this.clearForm();
       } catch (err) {
         console.error('[Lock PDF] Final error:', err);
-        await showAlert('Lỗi', 'Không thể khóa file PDF:\n' + err.message);
+        await showAlert('Lỗi', t('msg.lockPdfFailed', { error: err.message }));
       }
     }
 
     async unlockPdf() {
       const sourceBytes = await this.readLockBytes();
       if (!sourceBytes) {
-        await showAlert('Cảnh báo', 'Vui lòng chọn file PDF trước!');
+        await showAlert('Cảnh báo', t('msg.selectPdfFirst'));
         return;
       }
 
@@ -4410,14 +5262,14 @@
       this.sourceWasEncrypted = false;
       this.initialRestrictions = {};
       this.selectAllState = false;
-      this.dom.fileInfo.textContent = 'Chưa chọn file';
-      this.dom.fileInfo.style.color = '#666';
+      this.dom.fileInfo.textContent = t('lock.fileNotSelected');
+      this.dom.fileInfo.style.color = '';
       this.dom.password.value = '';
       this.dom.passwordConfirm.value = '';
       Object.values(this.checkboxes).forEach(cb => { cb.checked = false; });
       Object.keys(this.checkboxes).forEach(k => this.updateRestrictionStyle(k));
-      this.dom.btnToggle.textContent = '☑ Chọn tất cả / Select all';
-      this.setEncryptionInfoState(false, 'chưa chọn file');
+      this.dom.btnToggle.textContent = t('lock.selectAllRestrictions');
+      this.setEncryptionInfoState(false, t('msg.encryptionDetailNotSelected'));
       this.setUiState(false);
     }
 
@@ -4438,6 +5290,25 @@
       ];
       Object.values(this.checkboxes).forEach(cb => { cb.disabled = !hasFile; });
       widgets.forEach(w => { if (w) w.disabled = !hasFile; });
+    }
+
+    onLanguageChanged() {
+      this.syncSelectAllButtonState();
+
+      if (!this.fileName) {
+        this.dom.fileInfo.textContent = t('lock.fileNotSelected');
+        this.dom.fileInfo.style.color = '';
+        this.setEncryptionInfoState(false, t('msg.encryptionDetailNotSelected'));
+        return;
+      }
+
+      const detail = this.sourceWasEncrypted
+        ? (this.sourceOpenPassword
+          ? t('msg.encryptionDetailOpenedByPassword')
+          : t('msg.encryptionDetailOwnerPassword'))
+        : t('msg.encryptionDetailNoOpenPassword');
+
+      this.setEncryptionInfoState(this.sourceWasEncrypted, detail);
     }
   }
 
@@ -4462,8 +5333,13 @@
 
   document.addEventListener('DOMContentLoaded', () => {
     setupTabs();
+    setupLanguageToggleButton();
+    setupThemeToggleButtons();
+    applyThemeMode(activeThemeMode, { persist: false });
+    applyLanguage(activeLanguage, { persist: false });
     window._pdfManager = new PDFManagerApp();
     window._pdfLockTool = new PDFLockTool();
+    applyLanguage(activeLanguage, { persist: false });
   });
 
 })();

@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="vi" data-theme="system">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>PDF Manager - Copyright © 2026 by Hailúa</title>
+  <link rel="icon" type="image/png" sizes="48x48" href="icons/icon48.png">
+  <link rel="icon" type="image/png" sizes="16x16" href="icons/icon16.png">
+  <link rel="stylesheet" href="manager.css">
+</head>
+
+<body>
+  <!-- ====== Tab Navigation ====== -->
+  <div class="tab-bar">
+    <div class="tab-nav">
+      <button class="tab-btn active" data-tab="manager">
+        <img src="icons/icon16.png" class="tab-icon">
+        <span data-i18n="tabs.manager">PDF Manager</span>
+      </button>
+      <button class="tab-btn" data-tab="lock" data-i18n="tabs.lock">🔒 PDF Lock/Unlock</button>
+    </div>
+    <div class="tab-utils">
+      <div class="theme-toggle-group" role="group" aria-label="Theme mode" data-i18n-title="toolbar.themeToggleTitle">
+        <button id="btn-theme-system" class="tab-util-btn tab-util-theme" type="button" data-theme-mode="system"
+          data-i18n="toolbar.themeSystem">System</button>
+        <button id="btn-theme-light" class="tab-util-btn tab-util-theme" type="button" data-theme-mode="light"
+          data-i18n="toolbar.themeLight">Light</button>
+        <button id="btn-theme-dark" class="tab-util-btn tab-util-theme" type="button" data-theme-mode="dark"
+          data-i18n="toolbar.themeDark">Dark</button>
+      </div>
+      <button id="btn-lang-toggle" class="tab-util-btn" type="button"
+        data-i18n-title="toolbar.languageToggleTitle">EN</button>
+    </div>
+  </div>
+
+  <!-- ====== TAB 1: PDF Manager ====== -->
+  <div id="tab-manager" class="tab-content active">
+    <!-- Top Bar -->
+    <div class="toolbar top-bar">
+      <div class="toolbar-left">
+        <button id="btn-open" class="btn btn-open" data-i18n="manager.openPdf" data-i18n-title="manager.openPdfTitle">📂
+          Open PDF</button>
+        <button id="btn-close" class="btn btn-close" disabled data-i18n="manager.closePdf"
+          data-i18n-title="manager.closePdfTitle">✖ Close PDF</button>
+        <span id="file-info" class="file-info" data-i18n="manager.fileNotSelected">Chưa chọn file nào</span>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-save" class="btn btn-save" disabled data-i18n="manager.saveAsPdf"
+          data-i18n-title="manager.saveAsPdfTitle">💾 SaveAs PDF</button>
+      </div>
+    </div>
+
+    <!-- Action Bar -->
+    <div class="toolbar action-bar">
+      <div class="toolbar-left">
+        <button id="btn-add" class="btn btn-add" disabled data-i18n="manager.addPdf"
+          data-i18n-title="manager.addPdfTitle">➕ Add PDF</button>
+        <button id="btn-select-all" class="btn btn-select" disabled data-i18n="manager.selectAll"
+          data-i18n-title="manager.selectAllTitle">☑ Select All</button>
+        <div class="btn-group">
+          <button id="btn-rotate-cw" class="btn btn-rotate" disabled data-i18n="manager.rotateCw"
+            data-i18n-title="manager.rotateCwTitle">↻ +90°</button>
+          <button id="btn-rotate-ccw" class="btn btn-rotate" disabled data-i18n="manager.rotateCcw"
+            data-i18n-title="manager.rotateCcwTitle">↺ -90°</button>
+          <button id="btn-rotate-180" class="btn btn-rotate" disabled data-i18n="manager.rotate180"
+            data-i18n-title="manager.rotate180Title">⇅ 180°</button>
+          <button id="btn-rotate-reset" class="btn btn-rotate-reset" disabled data-i18n="manager.rotateReset"
+            data-i18n-title="manager.rotateResetTitle">↺ Reset 0°</button>
+        </div>
+        <div class="btn-group">
+          <button id="btn-move-up" class="btn btn-move" disabled data-i18n="manager.moveUp"
+            data-i18n-title="manager.moveUpTitle">⬆ Move Up</button>
+          <button id="btn-move-down" class="btn btn-move" disabled data-i18n="manager.moveDown"
+            data-i18n-title="manager.moveDownTitle">⬇ Move Down</button>
+        </div>
+        <button id="btn-delete" class="btn btn-delete" disabled data-i18n="manager.delete"
+          data-i18n-title="manager.deleteTitle">🗑 Delete</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="btn-reset-all" class="btn btn-reset-all" disabled data-i18n="manager.resetAll"
+          data-i18n-title="manager.resetAllTitle">⎌ Reset All</button>
+      </div>
+    </div>
+
+    <!-- Pages Grid (main scrollable content area) -->
+    <div id="pages-wrapper" class="pages-wrapper">
+      <div id="pages-grid" class="pages-grid">
+        <div class="empty-placeholder" id="empty-placeholder">
+          <p class="empty-icon">📄</p>
+          <p data-i18n="manager.emptyTitle">Chưa mở file PDF nào</p>
+          <p class="empty-hint" data-i18n-html="manager.emptyHintHtml">Nhấn <strong>"Open PDF"</strong> hoặc kéo thả
+            file PDF vào đây</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Bottom Bar -->
+    <div class="toolbar bottom-bar">
+      <div class="toolbar-left">
+        <div class="stats-primary-row">
+          <span id="page-count" class="stat">Tổng số trang: 0</span>
+          <span id="selected-count" class="stat stat-selected">| Đã chọn: 0</span>
+          <span id="lazy-render-status" class="stat stat-render-mode">| Thumbnail mode: lazy-rendered | JS | 0 columns |
+            Zoom 80% | Storage: --</span>
+        </div>
+        <div class="stats-temp-row">
+          <span id="temp-path-status" class="stat stat-temp-path">| Temp path: --</span>
+        </div>
+      </div>
+      <div class="toolbar-right">
+        <label class="perf-toggle" data-i18n-title="manager.lowMemoryTitle">
+          <input type="checkbox" id="low-mem-toggle">
+          <span data-i18n="manager.lowMemoryMode">Chế độ máy yếu</span>
+        </label>
+        <div id="perf-widget" class="perf-widget" data-i18n-title="manager.perfWidgetTitle">
+          <span class="perf-chip"><strong data-i18n="manager.ramLabel">RAM:</strong> <span
+              id="perf-ram">--</span></span>
+          <span class="perf-chip"><strong data-i18n="manager.cpuLabel">CPU:</strong> <span
+              id="perf-cpu">--</span></span>
+        </div>
+        <button id="btn-purge-memory" class="btn btn-purge-memory" disabled data-i18n="manager.purgeMemory"
+          data-i18n-title="manager.purgeMemoryTitle">Purge Memory</button>
+        <span class="zoom-label" data-i18n="manager.zoomLabel">Zoom (%):</span>
+        <input type="number" id="zoom-input" class="zoom-input" value="80" min="40" max="500" step="5" disabled>
+        <button id="btn-zoom-apply" class="btn btn-zoom" disabled data-i18n="manager.apply">Apply</button>
+      </div>
+    </div>
+
+    <!-- About Bar -->
+    <div class="about-bar">
+      <span class="about-text" data-i18n="about.copyright">Copyright © 2026 by Hailúa</span>
+      <a class="about-link" href="https://github.com/farmertek/pdfman-chromium-extension" target="_blank"
+        rel="noopener">github.com/farmertek/pdfman-chromium-extension</a>
+    </div>
+  </div>
+
+  <!-- ====== TAB 2: PDF Lock/Unlock ====== -->
+  <div id="tab-lock" class="tab-content">
+    <div class="lock-container">
+      <h2 class="lock-title" data-i18n="lock.title">Tool Lock/Unlock PDF with Restrictions (AES-256 + AES-128 fallback)
+      </h2>
+
+      <!-- File selector -->
+      <div class="lock-section lock-file-section">
+        <button id="lock-btn-open" class="btn btn-open" data-i18n="manager.openPdf"
+          data-i18n-title="lock.openPdfTitle">📂 Open PDF</button>
+        <span id="lock-file-info" class="file-info" data-i18n="lock.fileNotSelected">Chưa chọn file</span>
+      </div>
+
+      <!-- Restrictions -->
+      <fieldset class="lock-section restrictions-fieldset" id="restrictions-fieldset">
+        <legend data-i18n="lock.restrictionsLegend">Restrictions / Quyền cần khóa</legend>
+        <div class="restrictions-controls">
+          <button id="lock-btn-reset" class="btn lock-ctrl-btn" disabled data-i18n="lock.resetRestrictions"
+            data-i18n-title="lock.resetRestrictionsTitle">🔄 Reset quyền / Reset</button>
+          <button id="lock-btn-toggle" class="btn lock-ctrl-btn" disabled data-i18n="lock.selectAllRestrictions"
+            data-i18n-title="lock.toggleRestrictionsTitle">☑ Chọn tất cả / Select all</button>
+          <span id="lock-encryption-info" class="encryption-info" data-i18n="lock.encryptionInitial">Trạng thái mã hóa:
+            chưa chọn file</span>
+        </div>
+        <div class="restrictions-list" id="restrictions-list">
+          <label class="restriction-item"><input type="checkbox" data-key="print" checked disabled> <span
+              data-i18n="lock.restriction.print">🚫 Khóa in tài liệu (Print)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="copy" checked disabled> <span
+              data-i18n="lock.restriction.copy">🚫 Khóa sao chép văn bản/đồ họa (Copy text/graphics)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="modify" checked disabled> <span
+              data-i18n="lock.restriction.modify">🚫 Khóa chỉnh sửa nội dung (Modify contents)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="annotate" checked disabled> <span
+              data-i18n="lock.restriction.annotate">🚫 Khóa chú thích/annotation (Modify annotations)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="fill" checked disabled> <span
+              data-i18n="lock.restriction.fill">🚫 Khóa điền biểu mẫu (Fill forms)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="extract" checked disabled> <span
+              data-i18n="lock.restriction.extract">🚫 Khóa trích xuất nội dung (Extract text/images)</span></label>
+          <label class="restriction-item"><input type="checkbox" data-key="comment" checked disabled> <span
+              data-i18n="lock.restriction.comment">🚫 Khóa bình luận/markup (Commenting/markup)</span></label>
+        </div>
+      </fieldset>
+
+      <!-- Password -->
+      <fieldset class="lock-section password-fieldset">
+        <legend data-i18n="lock.passwordLegend">Password (tùy chọn) / Optional</legend>
+        <p class="hint" data-i18n="lock.passwordHint">Để trống nếu chỉ muốn khóa restrictions mà không yêu cầu password
+          mở file</p>
+        <div class="password-row">
+          <label data-i18n="lock.passwordLabel">Password:</label>
+          <input type="password" id="lock-password" class="lock-input" disabled>
+        </div>
+        <div class="password-row">
+          <label data-i18n="lock.passwordConfirmLabel">Nhập lại Password:</label>
+          <input type="password" id="lock-password-confirm" class="lock-input" disabled>
+        </div>
+      </fieldset>
+
+      <!-- Actions -->
+      <div class="lock-section lock-actions">
+        <button id="lock-btn-lock" class="btn btn-lock" disabled data-i18n="lock.lockPdf"
+          data-i18n-title="lock.lockPdfTitle">🔒 Lock PDF / Khóa PDF</button>
+        <button id="lock-btn-unlock" class="btn btn-unlock" disabled data-i18n="lock.unlockPdf"
+          data-i18n-title="lock.unlockPdfTitle">🔓 Unlock PDF / Mở khóa PDF</button>
+        <span class="hint" data-i18n="lock.profileHint">Profile mặc định: AES-256. Nếu môi trường không hỗ trợ, hệ thống
+          tự fallback sang AES-128.</span>
+      </div>
+    </div>
+
+    <div class="about-bar">
+      <span class="about-text" data-i18n="about.copyright">Copyright © 2026 by Hailúa</span>
+      <a class="about-link" href="https://github.com/farmertek/pdfman-chromium-extension" target="_blank"
+        rel="noopener">github.com/farmertek/pdfman-chromium-extension</a>
+    </div>
+  </div>
+
+  <!-- ====== Custom Modal Dialog ====== -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal-dialog">
+      <div class="modal-title" id="modal-title"></div>
+      <div class="modal-message" id="modal-message"></div>
+      <div class="modal-input-row hidden" id="modal-input-row">
+        <input type="password" id="modal-input" class="modal-input" placeholder="">
+      </div>
+      <div class="modal-buttons" id="modal-buttons"></div>
+    </div>
+  </div>
+
+  <!-- Hidden file inputs -->
+  <input type="file" id="file-input" accept=".pdf" multiple hidden>
+  <input type="file" id="file-input-add" accept=".pdf" multiple hidden>
+  <input type="file" id="lock-file-input" accept=".pdf" multiple hidden>
+
+  <!-- Libraries (populated by build.js) -->
+  <script src="lib/pdf.js"></script>
+  <script src="lib/pdf-lib.min.js"></script>
+  <script src="lib/qpdf/qpdf.js"></script>
+  <!-- Main application -->
+  <script src="manager.js"></script>
+</body>
+
+</html>

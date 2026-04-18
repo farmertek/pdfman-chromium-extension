@@ -2,6 +2,15 @@
 
 All notable changes to PDF Manager extension are documented in this file.
 
+## 1.0.4 - 2026-04-18
+
+- UX: added manual theme selector buttons (System/Light/Dark) directly on the top tab bar, next to the EN/VI language toggle.
+- UX: active theme mode now has a visible selected state in the toolbar for quick verification.
+- i18n: added localized labels and tooltip for the manual theme selector in both Vietnamese and English.
+- Bugfix: in dark mode, Lock/Unlock file status label now follows theme text color for better readability (no hardcoded black text).
+- Bugfix: in dark mode, button hover now keeps each button's original color and applies only a subtle highlight effect.
+- Bugfix: Lock/Unlock button text color now matches Open PDF button color to keep labels readable in light mode.
+
 ## 1.0.3 - 2026-04-16
 
 - Security: PDF Lock now defaults to AES-256 encryption profile.
