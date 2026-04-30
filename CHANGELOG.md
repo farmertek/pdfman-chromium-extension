@@ -2,6 +2,12 @@
 
 All notable changes to PDF Manager extension are documented in this file.
 
+## 1.0.5 - 2026-04-30
+
+- Bugfix: fixed dialog/message button contrast in light mode by preventing theme-level `.btn` rules from overriding modal action button backgrounds.
+- UX: modal action buttons now use theme-aware color tokens for both light and dark modes, including hover states.
+- Release: bumped extension/package version to 1.0.5 for Chrome Web Store packaging.
+
 ## 1.0.4 - 2026-04-18
 
 - UX: added manual theme selector buttons (System/Light/Dark) directly on the top tab bar, next to the EN/VI language toggle.

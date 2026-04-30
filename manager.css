@@ -756,6 +756,13 @@ body.low-memory-mode .perf-toggle {
   --accent-2: #0b6cc7;
   --danger: #d9480f;
   --warning: #be6d00;
+  --modal-button-on-color: #ffffff;
+  --modal-primary-bg: #1a73e8;
+  --modal-primary-hover: #1557b0;
+  --modal-danger-bg: #d33b27;
+  --modal-danger-hover: #b02a1a;
+  --modal-success-bg: #00820f;
+  --modal-success-hover: #006a0c;
   --border: rgba(42, 56, 66, 0.2);
   --border-strong: rgba(42, 56, 66, 0.34);
   --shadow-soft: 0 8px 18px rgba(15, 34, 50, 0.08);
@@ -786,6 +793,13 @@ body.low-memory-mode .perf-toggle {
   --accent-2: #4ba4ef;
   --danger: #ff8157;
   --warning: #f0b457;
+  --modal-button-on-color: #06131a;
+  --modal-primary-bg: #58b2fb;
+  --modal-primary-hover: #3e9de7;
+  --modal-danger-bg: #ff9b75;
+  --modal-danger-hover: #f58a62;
+  --modal-success-bg: #39c79f;
+  --modal-success-hover: #25ad87;
   --border: rgba(195, 226, 241, 0.2);
   --border-strong: rgba(195, 226, 241, 0.34);
   --shadow-soft: 0 12px 22px rgba(0, 0, 0, 0.25);
@@ -812,6 +826,13 @@ body.low-memory-mode .perf-toggle {
     --accent-2: #4ba4ef;
     --danger: #ff8157;
     --warning: #f0b457;
+    --modal-button-on-color: #06131a;
+    --modal-primary-bg: #58b2fb;
+    --modal-primary-hover: #3e9de7;
+    --modal-danger-bg: #ff9b75;
+    --modal-danger-hover: #f58a62;
+    --modal-success-bg: #39c79f;
+    --modal-success-hover: #25ad87;
     --border: rgba(195, 226, 241, 0.2);
     --border-strong: rgba(195, 226, 241, 0.34);
     --shadow-soft: 0 12px 22px rgba(0, 0, 0, 0.25);
@@ -1043,8 +1064,7 @@ body::after {
   color: #0b6cc7;
 }
 
-.btn-delete,
-.modal-btn-danger {
+.btn-delete {
   color: var(--danger);
 }
 
@@ -1059,9 +1079,44 @@ body::after {
   color: #db4f00;
 }
 
-.modal-btn-primary,
-.modal-btn-success {
-  color: #fff;
+.modal-buttons .btn.modal-btn-primary,
+.modal-buttons .btn.modal-btn-danger,
+.modal-buttons .btn.modal-btn-success {
+  color: var(--modal-button-on-color);
+  font-weight: bold;
+}
+
+.modal-buttons .btn.modal-btn-primary {
+  background: var(--modal-primary-bg);
+  border-color: var(--modal-primary-hover);
+}
+
+.modal-buttons .btn.modal-btn-danger {
+  background: var(--modal-danger-bg);
+  border-color: var(--modal-danger-hover);
+}
+
+.modal-buttons .btn.modal-btn-success {
+  background: var(--modal-success-bg);
+  border-color: var(--modal-success-hover);
+}
+
+.modal-buttons .btn.modal-btn-primary:hover:not(:disabled) {
+  background: var(--modal-primary-hover);
+  border-color: var(--modal-primary-hover);
+  color: var(--modal-button-on-color);
+}
+
+.modal-buttons .btn.modal-btn-danger:hover:not(:disabled) {
+  background: var(--modal-danger-hover);
+  border-color: var(--modal-danger-hover);
+  color: var(--modal-button-on-color);
+}
+
+.modal-buttons .btn.modal-btn-success:hover:not(:disabled) {
+  background: var(--modal-success-hover);
+  border-color: var(--modal-success-hover);
+  color: var(--modal-button-on-color);
 }
 
 .file-info {
